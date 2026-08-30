@@ -1,0 +1,122 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.database.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
+from app.schemas.ocean_schema import (
+    OceanDataCreate,
+    OceanDataUpdate,
+    OceanDataResponse,
+)
+from app.services.ocean_service import OceanService
+
+
+router = APIRouter(
+    prefix="/ocean",
+    tags=["Ocean Data"],
+)
+
+
+# ============================================================
+# CREATE OCEAN DATA
+# ============================================================
+
+@router.post(
+    "/",
+    response_model=OceanDataResponse,
+)
+def create_ocean_data(
+    ocean: OceanDataCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return OceanService.create_ocean_data(
+        db=db,
+        latitude=ocean.latitude,
+        longitude=ocean.longitude,
+        temperature=ocean.temperature,
+        ph=ocean.ph,
+        salinity=ocean.salinity,
+        oxygen=ocean.oxygen,
+        owner_id=current_user.id,
+    )
+
+
+# ============================================================
+# GET ALL OCEAN DATA
+# ============================================================
+
+@router.get(
+    "/",
+    response_model=list[OceanDataResponse],
+)
+def get_all_ocean_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return OceanService.get_all_ocean_data(db)
+
+
+# ============================================================
+# GET OCEAN DATA BY ID
+# ============================================================
+
+@router.get(
+    "/{ocean_id}",
+    response_model=OceanDataResponse,
+)
+def get_ocean_data(
+    ocean_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return OceanService.get_ocean_data_by_id(
+        db=db,
+        ocean_id=ocean_id,
+    )
+
+
+# ============================================================
+# UPDATE OCEAN DATA
+# ============================================================
+
+@router.put(
+    "/{ocean_id}",
+    response_model=OceanDataResponse,
+)
+def update_ocean_data(
+    ocean_id: int,
+    ocean: OceanDataUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return OceanService.update_ocean_data(
+        db=db,
+        ocean_id=ocean_id,
+        latitude=ocean.latitude,
+        longitude=ocean.longitude,
+        temperature=ocean.temperature,
+        ph=ocean.ph,
+        salinity=ocean.salinity,
+        oxygen=ocean.oxygen,
+        is_active=ocean.is_active,
+    )
+
+
+# ============================================================
+# DELETE OCEAN DATA
+# ============================================================
+
+@router.delete(
+    "/{ocean_id}",
+)
+def delete_ocean_data(
+    ocean_id: int,  
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return OceanService.delete_ocean_data(
+        db=db,
+        ocean_id=ocean_id,
+    )

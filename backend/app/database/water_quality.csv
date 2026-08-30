@@ -1,0 +1,13 @@
+temperature,ph,salinity,dissolved_oxygen,quality
+25,7.2,34,6.5,Good
+27,7.5,33,6.8,Good
+29,7.8,35,6.1,Good
+31,7.0,34,5.8,Moderate
+33,6.8,36,5.3,Moderate
+35,6.4,38,4.2,Poor
+37,5.9,39,3.8,Poor
+39,5.6,40,3.2,Poor
+22,7.3,32,7.0,Good
+24,7.1,33,6.9,Good
+30,6.9,35,5.5,Moderate
+36,6.2,38,4.1,Poor
