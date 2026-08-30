@@ -13,34 +13,39 @@ from app.schemas.ocean_schema import (
 )
 from app.services import ocean_service
 
+
 router = APIRouter(
     prefix="/ocean-data",
-    tags=["Ocean Data"]
+    tags=["Ocean Data"],
 )
 
 
-# Create Ocean Data
-@router.post("")
+# ============================================================
+# CREATE OCEAN DATA
+# ============================================================
+
+@router.post("", response_model=OceanDataResponse)
 def create_ocean_data(
     data: OceanDataCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ocean = ocean_service.create_ocean_data(
+    return ocean_service.create_ocean_data(
         db=db,
-        location=data.location,
+        latitude=data.latitude,
+        longitude=data.longitude,
         temperature=data.temperature,
         ph=data.ph,
+        salinity=data.salinity,
+        oxygen=data.oxygen,
         owner_id=current_user.id,
     )
 
-    return {
-        "message": "Ocean data inserted successfully",
-        "id": ocean.id,
-    }
 
+# ============================================================
+# GET ALL OCEAN DATA
+# ============================================================
 
-# Get All Ocean Data
 @router.get("", response_model=List[OceanDataResponse])
 def get_all_ocean_data(
     db: Session = Depends(get_db),
@@ -49,51 +54,57 @@ def get_all_ocean_data(
     return ocean_service.get_all_ocean_data(db)
 
 
-# Get Ocean Data By ID
+# ============================================================
+# GET OCEAN DATA BY ID
+# ============================================================
+
 @router.get("/{ocean_id}", response_model=OceanDataResponse)
 def get_ocean_data(
     ocean_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return ocean_service.get_ocean_data(db, ocean_id)
+    return ocean_service.get_ocean_data_by_id(
+        db,
+        ocean_id,
+    )
 
 
-# Update Ocean Data
-@router.put("/{ocean_id}")
+# ============================================================
+# UPDATE OCEAN DATA
+# ============================================================
+
+@router.put("/{ocean_id}", response_model=OceanDataResponse)
 def update_ocean_data(
     ocean_id: int,
     data: OceanDataUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ocean_service.update_ocean_data(
+    return ocean_service.update_ocean_data(
         db=db,
         ocean_id=ocean_id,
-        location=data.location,
+        latitude=data.latitude,
+        longitude=data.longitude,
         temperature=data.temperature,
         ph=data.ph,
-        current_user=current_user,
+        salinity=data.salinity,
+        oxygen=data.oxygen,
+        is_active=data.is_active,
     )
 
-    return {
-        "message": "Ocean data updated successfully",
-    }
 
+# ============================================================
+# DELETE OCEAN DATA
+# ============================================================
 
-# Delete Ocean Data
 @router.delete("/{ocean_id}")
 def delete_ocean_data(
     ocean_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ocean_service.delete_ocean_data(
+    return ocean_service.delete_ocean_data(
         db=db,
         ocean_id=ocean_id,
-        current_user=current_user,
     )
-
-    return {
-        "message": "Ocean data deleted successfully",
-    }
