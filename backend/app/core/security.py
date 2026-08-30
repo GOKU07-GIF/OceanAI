@@ -14,26 +14,16 @@ from app.database.database import get_db
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 
-# ==========================================================
-# Password Hashing
-# ==========================================================
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
-    deprecated="auto"
+    deprecated="auto",
 )
-
-# ==========================================================
-# OAuth2 Scheme
-# ==========================================================
 
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/auth/login"
+    tokenUrl="/auth/login",
 )
 
-# ==========================================================
-# Password Functions
-# ==========================================================
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -41,35 +31,30 @@ def hash_password(password: str) -> str:
 
 def verify_password(
     plain_password: str,
-    hashed_password: str
+    hashed_password: str,
 ) -> bool:
     return pwd_context.verify(
         plain_password,
-        hashed_password
+        hashed_password,
     )
 
-# ==========================================================
-# JWT Access Token
-# ==========================================================
 
 def create_access_token(
     data: dict,
     expires_delta: Optional[timedelta] = None,
 ) -> str:
-
     expire = datetime.utcnow() + (
         expires_delta
         if expires_delta
         else timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
         )
     )
 
     payload = data.copy()
-
     payload.update({
         "exp": expire,
-        "type": "access"
+        "type": "access",
     })
 
     return jwt.encode(
@@ -78,23 +63,16 @@ def create_access_token(
         algorithm=settings.ALGORITHM,
     )
 
-# ==========================================================
-# JWT Refresh Token
-# ==========================================================
 
-def create_refresh_token(
-    data: dict,
-) -> str:
-
+def create_refresh_token(data: dict) -> str:
     expire = datetime.utcnow() + timedelta(
-        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+        days=settings.REFRESH_TOKEN_EXPIRE_DAYS,
     )
 
     payload = data.copy()
-
     payload.update({
         "exp": expire,
-        "type": "refresh"
+        "type": "refresh",
     })
 
     return jwt.encode(
@@ -103,61 +81,37 @@ def create_refresh_token(
         algorithm=settings.ALGORITHM,
     )
 
-# ==========================================================
-# Token Hashing
-# ==========================================================
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(
         token.encode("utf-8")
     ).hexdigest()
 
-# ==========================================================
-# Decode Token
-# ==========================================================
 
-def decode_token(
-    token: str,
-):
-
+def decode_token(token: str):
     try:
-
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             settings.SECRET_KEY,
-            algorithms=[
-                settings.ALGORITHM
-            ],
+            algorithms=[settings.ALGORITHM],
         )
-
-        return payload
-
-    except ExpiredSignatureError:
+    except (ExpiredSignatureError, InvalidTokenError):
         return None
 
-    except InvalidTokenError:
-        return None
-
-# ==========================================================
-# Current User Dependency
-# ==========================================================
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={
-            "WWW-Authenticate": "Bearer"
-        },
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
     payload = decode_token(token)
 
-    if payload is None:
+    if payload is None or payload.get("type") != "access":
         raise credentials_exception
 
     email = payload.get("sub")
@@ -165,12 +119,9 @@ def get_current_user(
     if email is None:
         raise credentials_exception
 
-    user = UserRepository.get_by_email(
-        db,
-        email,
-    )
+    user = UserRepository.get_by_email(db, email)
 
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_exception
 
     return user
