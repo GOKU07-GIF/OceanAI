@@ -2,9 +2,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.sensor_device import SensorDevice
-from app.repositories.sensor_device_repository import (
-    SensorDeviceRepository,
-)
+from app.models.user import User
+from app.repositories.sensor_device_repository import SensorDeviceRepository
 
 
 def create_device(
@@ -16,20 +15,10 @@ def create_device(
     latitude: float,
     longitude: float,
 ):
-    """
-    Register a new sensor device.
-    """
-
-    existing = SensorDeviceRepository.get_by_device_id(
-        db,
-        device_id,
-    )
+    existing = SensorDeviceRepository.get_by_device_id(db, device_id)
 
     if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="Device ID already exists",
-        )
+        raise HTTPException(status_code=400, detail="Device ID already exists")
 
     device = SensorDevice(
         owner_id=owner_id,
@@ -39,41 +28,21 @@ def create_device(
         latitude=latitude,
         longitude=longitude,
     )
-
-    return SensorDeviceRepository.create(
-        db,
-        device,
-    )
+    return SensorDeviceRepository.create(db, device)
 
 
-def get_all_devices(
-    db: Session,
-):
-    """
-    Return all registered devices.
-    """
-    return SensorDeviceRepository.get_all(
-        db,
-    )
+def get_all_devices(db: Session, current_user: User):
+    return SensorDeviceRepository.get_all(db, owner_id=current_user.id)
 
 
-def get_device(
-    db: Session,
-    device_id: int,
-):
-    """
-    Return one device.
-    """
-
+def get_device(db: Session, device_id: int, current_user: User):
     device = SensorDeviceRepository.get_by_id(
         db,
         device_id,
+        owner_id=current_user.id,
     )
 
     if device is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Device not found",
-        )
+        raise HTTPException(status_code=404, detail="Device not found")
 
     return device
