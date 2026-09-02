@@ -1,21 +1,19 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.database.database import get_db
 from app.models.user import User
-from app.schemas.alert_schema import (
-    AlertCreate,
-    AlertResponse,
-    AlertReadResponse,
-)
+from app.schemas.alert_schema import AlertCreate, AlertResponse, AlertReadResponse
 from app.services.alert_service import AlertService
 
 
-router = APIRouter(
-    prefix="/alerts",
-    tags=["Alerts"],
-)
+router = APIRouter(prefix="/alerts", tags=["Alerts"])
+
+
+def _require_own_alerts(current_user: User, user_id: int) -> None:
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only access your own alerts")
 
 
 @router.post(
@@ -39,10 +37,7 @@ def create_alert(
     )
 
 
-@router.get(
-    "/",
-    response_model=list[AlertResponse],
-)
+@router.get("/", response_model=list[AlertResponse])
 def get_all_alerts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -50,10 +45,7 @@ def get_all_alerts(
     return AlertService.get_user_alerts(db, current_user.id)
 
 
-@router.get(
-    "/{alert_id}",
-    response_model=AlertResponse,
-)
+@router.get("/{alert_id}", response_model=AlertResponse)
 def get_alert_by_id(
     alert_id: int,
     db: Session = Depends(get_db),
@@ -62,40 +54,27 @@ def get_alert_by_id(
     return AlertService.get_alert_by_id(db, alert_id, current_user.id)
 
 
-@router.get(
-    "/user/{user_id}",
-    response_model=list[AlertResponse],
-)
+@router.get("/user/{user_id}", response_model=list[AlertResponse])
 def get_user_alerts(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if user_id != current_user.id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="You can only access your own alerts")
+    _require_own_alerts(current_user, user_id)
     return AlertService.get_user_alerts(db, user_id)
 
 
-@router.get(
-    "/user/{user_id}/unread",
-    response_model=list[AlertResponse],
-)
+@router.get("/user/{user_id}/unread", response_model=list[AlertResponse])
 def get_unread_user_alerts(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if user_id != current_user.id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="You can only access your own alerts")
+    _require_own_alerts(current_user, user_id)
     return AlertService.get_unread_user_alerts(db, user_id)
 
 
-@router.put(
-    "/{alert_id}/read",
-    response_model=AlertResponse,
-)
+@router.put("/{alert_id}/read", response_model=AlertResponse)
 def mark_alert_as_read(
     alert_id: int,
     db: Session = Depends(get_db),
@@ -104,16 +83,11 @@ def mark_alert_as_read(
     return AlertService.mark_alert_as_read(db, alert_id, current_user.id)
 
 
-@router.put(
-    "/user/{user_id}/read-all",
-    response_model=AlertReadResponse,
-)
+@router.put("/user/{user_id}/read-all", response_model=AlertReadResponse)
 def mark_all_user_alerts_as_read(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if user_id != current_user.id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="You can only update your own alerts")
+    _require_own_alerts(current_user, user_id)
     return AlertService.mark_all_user_alerts_as_read(db, user_id)
