@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.security import get_current_user
 from app.database.database import get_db
-
+from app.models.user import User
 from app.schemas.sensor_reading_schema import (
     SensorReadingCreate,
     SensorReadingResponse,
 )
-
 from app.services.sensor_reading_service import (
     create_reading,
     latest_readings,
@@ -26,8 +26,8 @@ router = APIRouter(
 def add_reading(
     reading: SensorReadingCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-
     return create_reading(
         db=db,
         sensor_device_id=reading.sensor_device_id,
@@ -37,6 +37,7 @@ def add_reading(
         oxygen=reading.oxygen,
         turbidity=reading.turbidity,
         water_quality=reading.water_quality,
+        current_user=current_user,
     )
 
 
@@ -46,8 +47,6 @@ def add_reading(
 )
 def get_readings(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-
-    return latest_readings(
-        db,
-    )
+    return latest_readings(db, current_user=current_user)
