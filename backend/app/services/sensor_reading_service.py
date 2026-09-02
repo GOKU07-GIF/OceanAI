@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.ai.anomaly_detector import detect_anomaly
+from app.ai.predictor import predict_water_quality
 from app.models.alert import Alert
 from app.models.ocean_data import OceanData
 from app.models.sensor_reading import SensorReading
@@ -33,6 +34,13 @@ def create_reading(
     if not device.is_active:
         raise HTTPException(status_code=400, detail="Sensor device is inactive")
 
+    ai_result = predict_water_quality(
+        temperature=temperature,
+        ph=ph,
+        salinity=salinity,
+        dissolved_oxygen=oxygen,
+    )
+
     reading = SensorReading(
         sensor_device_id=sensor_device_id,
         temperature=temperature,
@@ -44,7 +52,6 @@ def create_reading(
     )
     reading = SensorReadingRepository.create(db, reading)
 
-    # Feed the existing OceanData-based dashboard, map and analytics from real sensor observations.
     ocean_data = OceanData(
         latitude=device.latitude,
         longitude=device.longitude,
@@ -58,7 +65,6 @@ def create_reading(
     db.add(ocean_data)
     db.commit()
 
-    # Run anomaly rules immediately after ingestion and create a user alert when required.
     anomaly = detect_anomaly(
         temperature=temperature,
         ph=ph,
@@ -68,15 +74,20 @@ def create_reading(
 
     if anomaly["status"] == "Alert":
         severity = "CRITICAL" if len(anomaly["alerts"]) >= 2 else "HIGH"
-        alert = Alert(
-            title="Ocean Sensor Anomaly",
-            message="; ".join(anomaly["alerts"]),
-            alert_type="WARNING",
-            severity=severity,
-            user_id=current_user.id,
-            is_read=False,
+        AlertRepository.create(
+            db,
+            Alert(
+                title=f"Ocean Sensor Anomaly - {ai_result['water_quality']}",
+                message=(
+                    f"AI assessment: {ai_result['recommendation']} "
+                    f"Detected: {'; '.join(anomaly['alerts'])}"
+                ),
+                alert_type="WARNING",
+                severity=severity,
+                user_id=current_user.id,
+                is_read=False,
+            ),
         )
-        AlertRepository.create(db, alert)
 
     return reading
 
