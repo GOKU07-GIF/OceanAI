@@ -1,33 +1,17 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database.database import get_db
-
 from app.core.security import get_current_user
-
+from app.database.database import get_db
 from app.models.user import User
-
-from app.schemas.sensor_device_schema import (
-    SensorDeviceCreate,
-    SensorDeviceResponse,
-)
-
-from app.services.sensor_device_service import (
-    create_device,
-    get_all_devices,
-    get_device,
-)
-
-router = APIRouter(
-    prefix="/devices",
-    tags=["Sensor Devices"],
-)
+from app.schemas.sensor_device_schema import SensorDeviceCreate, SensorDeviceResponse
+from app.services.sensor_device_service import create_device, get_all_devices, get_device
 
 
-@router.post(
-    "",
-    response_model=SensorDeviceResponse,
-)
+router = APIRouter(prefix="/devices", tags=["Sensor Devices"])
+
+
+@router.post("", response_model=SensorDeviceResponse)
 def register_device(
     device: SensorDeviceCreate,
     db: Session = Depends(get_db),
@@ -44,27 +28,18 @@ def register_device(
     )
 
 
-@router.get(
-    "",
-    response_model=list[SensorDeviceResponse],
-)
+@router.get("", response_model=list[SensorDeviceResponse])
 def get_devices(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return get_all_devices(
-        db,
-    )
+    return get_all_devices(db, current_user)
 
 
-@router.get(
-    "/{device_id}",
-    response_model=SensorDeviceResponse,
-)
+@router.get("/{device_id}", response_model=SensorDeviceResponse)
 def get_single_device(
     device_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return get_device(
-        db,
-        device_id,
-    )
+    return get_device(db, device_id, current_user)
