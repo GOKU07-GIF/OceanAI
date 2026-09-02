@@ -6,49 +6,32 @@ from app.models.sensor_device import SensorDevice
 class SensorDeviceRepository:
 
     @staticmethod
-    def get_by_device_id(
-        db: Session,
-        device_id: str,
-    ):
+    def get_by_device_id(db: Session, device_id: str):
         return (
             db.query(SensorDevice)
-            .filter(
-                SensorDevice.device_id == device_id
-            )
+            .filter(SensorDevice.device_id == device_id)
             .first()
         )
 
     @staticmethod
-    def create(
-        db: Session,
-        device: SensorDevice,
-    ):
-
+    def create(db: Session, device: SensorDevice):
         db.add(device)
-
         db.commit()
-
         db.refresh(device)
-
         return device
 
     @staticmethod
-    def get_all(
-        db: Session,
-    ):
-        return db.query(
-            SensorDevice
-        ).all()
-
-    @staticmethod
-    def get_by_id(
-        db: Session,
-        device_id: int,
-    ):
+    def get_all(db: Session, owner_id: int):
         return (
             db.query(SensorDevice)
-            .filter(
-                SensorDevice.id == device_id
-            )
-            .first()
+            .filter(SensorDevice.owner_id == owner_id)
+            .order_by(SensorDevice.created_at.desc())
+            .all()
         )
+
+    @staticmethod
+    def get_by_id(db: Session, device_id: int, owner_id: int | None = None):
+        query = db.query(SensorDevice).filter(SensorDevice.id == device_id)
+        if owner_id is not None:
+            query = query.filter(SensorDevice.owner_id == owner_id)
+        return query.first()
