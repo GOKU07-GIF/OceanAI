@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.ai.anomaly_detector import detect_anomaly
+from app.models.alert import Alert
 from app.models.ocean_data import OceanData
 from app.models.sensor_reading import SensorReading
 from app.models.user import User
@@ -43,8 +44,7 @@ def create_reading(
     )
     reading = SensorReadingRepository.create(db, reading)
 
-    # A sensor reading becomes an OceanData observation so the existing
-    # dashboard, map and analytics features can consume real sensor data.
+    # Feed the existing OceanData-based dashboard, map and analytics from real sensor observations.
     ocean_data = OceanData(
         latitude=device.latitude,
         longitude=device.longitude,
@@ -58,7 +58,7 @@ def create_reading(
     db.add(ocean_data)
     db.commit()
 
-    # Run the existing anomaly rules immediately after ingestion.
+    # Run anomaly rules immediately after ingestion and create a user alert when required.
     anomaly = detect_anomaly(
         temperature=temperature,
         ph=ph,
@@ -68,17 +68,15 @@ def create_reading(
 
     if anomaly["status"] == "Alert":
         severity = "CRITICAL" if len(anomaly["alerts"]) >= 2 else "HIGH"
-        alert = AlertRepository.create(
-            db,
-            __import__("app.models.alert", fromlist=["Alert"]).Alert(
-                title="Ocean Sensor Anomaly",
-                message="; ".join(anomaly["alerts"]),
-                alert_type="WARNING",
-                severity=severity,
-                user_id=current_user.id,
-                is_read=False,
-            ),
+        alert = Alert(
+            title="Ocean Sensor Anomaly",
+            message="; ".join(anomaly["alerts"]),
+            alert_type="WARNING",
+            severity=severity,
+            user_id=current_user.id,
+            is_read=False,
         )
+        AlertRepository.create(db, alert)
 
     return reading
 
