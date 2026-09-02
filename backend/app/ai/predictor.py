@@ -1,21 +1,20 @@
+from pathlib import Path
+
+
 def predict_water_quality(
     temperature: float,
     ph: float,
     salinity: float,
-    dissolved_oxygen: float
+    dissolved_oxygen: float,
 ):
-
     score = 0
 
     if 20 <= temperature <= 30:
         score += 1
-
     if 6.5 <= ph <= 8.5:
         score += 1
-
     if 30 <= salinity <= 36:
         score += 1
-
     if dissolved_oxygen >= 5:
         score += 1
 
@@ -23,12 +22,10 @@ def predict_water_quality(
         quality = "Good"
         pollution = "Low"
         recommendation = "Water is safe for marine life."
-
     elif score >= 2:
         quality = "Moderate"
         pollution = "Medium"
         recommendation = "Continuous monitoring recommended."
-
     else:
         quality = "Poor"
         pollution = "High"
@@ -37,19 +34,19 @@ def predict_water_quality(
     return {
         "water_quality": quality,
         "pollution_level": pollution,
-        "recommendation": recommendation
+        "recommendation": recommendation,
     }
 
-import joblib
-import os
 
-MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "models",
-    "ocean_model.pkl",
-)
+MODEL_PATH = Path(__file__).resolve().parent / "models" / "ocean_model.pkl"
 
-model = joblib.load(MODEL_PATH)
+
+def _load_model():
+    if not MODEL_PATH.exists():
+        return None
+
+    import joblib
+    return joblib.load(MODEL_PATH)
 
 
 class OceanPredictor:
@@ -61,14 +58,15 @@ class OceanPredictor:
         salinity: float,
         oxygen: float,
     ):
+        model = _load_model()
 
-        prediction = model.predict([
-            [
+        if model is None:
+            return predict_water_quality(
                 temperature,
                 ph,
                 salinity,
                 oxygen,
-            ]
-        ])
+            )
 
+        prediction = model.predict([[temperature, ph, salinity, oxygen]])
         return prediction[0]
