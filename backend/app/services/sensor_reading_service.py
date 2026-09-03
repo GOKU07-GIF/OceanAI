@@ -34,62 +34,74 @@ def create_reading(
     if not device.is_active:
         raise HTTPException(status_code=400, detail="Sensor device is inactive")
 
-    ai_result = predict_water_quality(
-        temperature=temperature,
-        ph=ph,
-        salinity=salinity,
-        dissolved_oxygen=oxygen,
-    )
-
-    reading = SensorReading(
-        sensor_device_id=sensor_device_id,
-        temperature=temperature,
-        ph=ph,
-        salinity=salinity,
-        oxygen=oxygen,
-        turbidity=turbidity,
-        water_quality=water_quality,
-    )
-    reading = SensorReadingRepository.create(db, reading)
-
-    ocean_data = OceanData(
-        latitude=device.latitude,
-        longitude=device.longitude,
-        temperature=temperature,
-        ph=ph,
-        salinity=salinity,
-        oxygen=oxygen,
-        is_active=True,
-        owner_id=current_user.id,
-    )
-    db.add(ocean_data)
-    db.commit()
-
-    anomaly = detect_anomaly(
-        temperature=temperature,
-        ph=ph,
-        salinity=salinity,
-        dissolved_oxygen=oxygen,
-    )
-
-    if anomaly["status"] == "Alert":
-        severity = "CRITICAL" if len(anomaly["alerts"]) >= 2 else "HIGH"
-        AlertRepository.create(
-            db,
-            Alert(
-                title=f"Ocean Sensor Anomaly - {ai_result['water_quality']}",
-                message=(
-                    f"AI assessment: {ai_result['recommendation']} "
-                    f"Detected: {'; '.join(anomaly['alerts'])}"
-                ),
-                alert_type="WARNING",
-                severity=severity,
-                user_id=current_user.id,
-                is_read=False,
-            ),
+    try:
+        ai_result = predict_water_quality(
+            temperature=temperature,
+            ph=ph,
+            salinity=salinity,
+            dissolved_oxygen=oxygen,
         )
 
-    return reading
+        reading = SensorReading(
+            sensor_device_id=sensor_device_id,
+            temperature=temperature,
+            ph=ph,
+            salinity=salinity,
+            oxygen=oxygen,
+            turbidity=turbidity,
+            water_quality=water_quality,
+        )
+        reading = SensorReadingRepository.create(db, reading)
+
+        ocean_data = OceanData(
+            latitude=device.latitude,
+            longitude=device.longitude,
+            temperature=temperature,
+            ph=ph,
+            salinity=salinity,
+            oxygen=oxygen,
+            is_active=True,
+            owner_id=current_user.id,
+        )
+        db.add(ocean_data)
+
+        anomaly = detect_anomaly(
+            temperature=temperature,
+            ph=ph,
+            salinity=salinity,
+            dissolved_oxygen=oxygen,
+        )
+
+        if anomaly["status"] == "Alert":
+            severity = "CRITICAL" if len(anomaly["alerts"]) >= 2 else "HIGH"
+            AlertRepository.create(
+                db,
+                Alert(
+                    title=f"Ocean Sensor Anomaly - {ai_result['water_quality']}",
+                    message=(
+                        f"AI assessment: {ai_result['recommendation']} "
+                        f"Detected: {'; '.join(anomaly['alerts'])}"
+                    ),
+                    alert_type="WARNING",
+                    severity=severity,
+                    user_id=current_user.id,
+                    is_read=False,
+                ),
+            )
+
+        db.commit()
+        db.refresh(reading)
+        return reading
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process sensor reading: {exc}",
+        ) from exc
 
 
 def latest_readings(
