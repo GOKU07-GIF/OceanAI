@@ -10,10 +10,14 @@ class SensorReadingRepository:
     def create(
         db: Session,
         reading: SensorReading,
+        commit: bool = False,
     ):
         db.add(reading)
-        db.commit()
-        db.refresh(reading)
+
+        if commit:
+            db.commit()
+            db.refresh(reading)
+
         return reading
 
     @staticmethod
