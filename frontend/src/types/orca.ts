@@ -23,13 +23,16 @@ export interface OrcaRisk {
 }
 
 export interface OrcaResponse {
-  response?: string;
-  answer?: string;
-  recommendation?: string | Record<string, unknown>;
-  evidence?: OrcaEvidence[] | Record<string, unknown>;
-  risk?: OrcaRisk | string | Record<string, unknown>;
+  activity?: string;
+  requested_time?: Record<string, string> | null;
+  plan?: Array<Record<string, unknown>>;
+  agent_results?: Array<Record<string, unknown>>;
+  evidence?: OrcaEvidence[];
+  risk_assessment?: OrcaRisk | Record<string, unknown>;
+  recommendation?: Record<string, unknown>;
+  assistant_response?: string;
+  response_source?: string;
   errors?: string[];
-  agent_results?: Record<string, unknown>;
   conversation_id?: string;
   [key: string]: unknown;
 }
