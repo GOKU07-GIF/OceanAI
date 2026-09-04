@@ -1,0 +1,164 @@
+version: 1
+project_region:
+  name: Indian Ocean and Indian coastal waters
+  bbox:
+    min_longitude: 50.0
+    max_longitude: 90.0
+    min_latitude: 0.0
+    max_latitude: 25.0
+  note: "Use smaller coastal boxes for development downloads; do not mirror global archives."
+
+status_definitions:
+  planned: "Dataset selected but no download has been performed."
+  ready: "Source and retrieval method are documented; credentials/access may still be required."
+  downloaded: "A real local download has been completed and validated."
+  validated: "Downloaded data passed metadata/value/time/coordinate checks."
+
+priority:
+  P0: "Required for the first real ORCA ocean-data path"
+  P1: "Important for fishing/PFZ reasoning"
+  P2: "Historical/context or future enhancement"
+
+datasets:
+  - id: copernicus_sst_nrt
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean - Sea Surface Temperature L4"
+    dataset_id: "cmems_obs-sst_glo_phy-temp_nrt_P1D-m"
+    variables: [analysed_sst]
+    data_kind: observation
+    frequency: daily
+    format: NetCDF
+    purpose: "Current SST and SST evidence"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: copernicus_physics_forecast
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean Physics Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
+    variables: [thetao, so, uo, vo, zos]
+    data_kind: forecast
+    frequency: daily
+    format: NetCDF
+    purpose: "Forecast temperature, salinity, currents and sea level"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: copernicus_physics_reanalysis
+    priority: P2
+    source: Copernicus Marine
+    product: "Global Ocean Physics Reanalysis"
+    dataset_id: "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+    variables: [thetao, so, uo, vo, zos]
+    data_kind: historical_reanalysis
+    frequency: daily
+    format: NetCDF
+    purpose: "Historical ocean context and model training features"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: copernicus_waves_forecast
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean Waves Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
+    variables: [VHM0, VTM02, VMDR]
+    data_kind: forecast
+    frequency: 3-hourly
+    format: NetCDF
+    purpose: "Significant wave height and wave-period/direction evidence"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: copernicus_bgc_forecast
+    priority: P1
+    source: Copernicus Marine
+    product: "Global Ocean Biogeochemistry Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_bgc_anfc_0.25deg_P1D-m"
+    variables: [chl]
+    data_kind: forecast
+    frequency: daily
+    format: NetCDF
+    purpose: "Chlorophyll-a / productivity context"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: copernicus_bgc_hindcast
+    priority: P2
+    source: Copernicus Marine
+    product: "Global Ocean Biogeochemistry Hindcast"
+    dataset_id: "cmems_mod_glo_bgc_my_0.25deg_P1D-m"
+    variables: [chl]
+    data_kind: historical_reanalysis
+    frequency: daily
+    format: NetCDF
+    purpose: "Historical chlorophyll/productivity features"
+    status: planned
+    access: "Copernicus Marine Toolbox subset; account credentials required"
+
+  - id: incois_pfzs
+    priority: P1
+    source: INCOIS
+    product: "Potential Fishing Zone Advisories"
+    dataset_id: null
+    variables: [pfz_advisory, landing_centres, sectors]
+    data_kind: advisory
+    frequency: near_real_time
+    format: ASCII/JPEG
+    purpose: "Fishing-specific advisory evidence"
+    status: planned
+    access: "INCOIS PFZ geoportal/data services; retrieval method to be validated before automation"
+
+  - id: incois_roms
+    priority: P1
+    source: INCOIS
+    product: "ROMS ocean model holdings"
+    dataset_id: null
+    variables: [sst, mld, d20, currents]
+    data_kind: near_real_time
+    frequency: near_real_time
+    format: provider_defined
+    purpose: "Indian-region model cross-check and local evidence"
+    status: planned
+    access: "INCOIS data services; retrieval/download path to be validated"
+
+  - id: incois_boundaries
+    priority: P1
+    source: INCOIS
+    product: "PFZ Geoportal spatial layers"
+    dataset_id: null
+    variables: [eez, bathymetry, landing_centres, sectors]
+    data_kind: static_reference
+    frequency: static
+    format: provider_defined
+    purpose: "Geofencing, coastal context and fishing-location features"
+    status: planned
+    access: "INCOIS PFZ geoportal/data services"
+
+  - id: incois_climatology
+    priority: P2
+    source: INCOIS
+    product: "NIO-New Global Climatology"
+    dataset_id: null
+    variables: [temperature, salinity]
+    data_kind: climatology
+    frequency: climatological
+    format: provider_defined
+    purpose: "Baseline/anomaly context"
+    status: planned
+    access: "INCOIS data holdings"
+
+  - id: noaa_erddap_observations
+    priority: P2
+    source: NOAA
+    product: "Oceanographic observations via ERDDAP"
+    dataset_id: null
+    variables: [sst, salinity, temperature, wind, currents]
+    data_kind: observation
+    frequency: provider_defined
+    format: provider_defined
+    purpose: "Independent observation cross-check and fallback"
+    status: planned
+    access: "NOAA ERDDAP dataset-specific endpoints"
