@@ -26,6 +26,8 @@ class ORCAPlanResponse(BaseModel):
     evidence: list[dict]
     risk_assessment: dict
     recommendation: dict
+    assistant_response: str
+    response_source: str
     errors: list[str]
 
 
@@ -58,5 +60,7 @@ def create_orca_plan(
         "evidence": result.get("evidence", []),
         "risk_assessment": result.get("risk_assessment", {}),
         "recommendation": result.get("recommendation", {}),
+        "assistant_response": result.get("assistant_response", ""),
+        "response_source": result.get("response_source", "deterministic_fallback"),
         "errors": result.get("errors", []),
     }
