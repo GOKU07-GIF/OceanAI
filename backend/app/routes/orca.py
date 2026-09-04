@@ -33,8 +33,6 @@ def create_orca_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ = db
-
     location = None
     if payload.latitude is not None and payload.longitude is not None:
         location = {
@@ -48,6 +46,7 @@ def create_orca_plan(
         location=location,
         language=payload.language,
         conversation_id=payload.conversation_id,
+        db=db,
     )
 
     return {
