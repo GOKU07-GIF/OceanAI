@@ -23,6 +23,12 @@ interface ConditionCardProps {
   icon: React.ReactNode;
 }
 
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+}
+
 function ConditionCard({ label, value, unit, icon }: ConditionCardProps): React.JSX.Element {
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-800 p-5">
@@ -119,6 +125,8 @@ export default function Orca(): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
+  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const orca = useOrca();
   const result = orca.data;
 
@@ -130,15 +138,47 @@ export default function Orca(): React.JSX.Element {
   const handleAsk = (): void => {
     const trimmed = query.trim();
     if (!trimmed || orca.isPending) return;
-    orca.mutate({
-      query: trimmed,
-      language: "en",
-      ...(latitude !== null && longitude !== null ? { latitude, longitude } : {}),
-    });
+
+    const userMessage: ChatMessage = {
+      id: `${Date.now()}-user`,
+      role: "user",
+      text: trimmed,
+    };
+    setMessages((current) => [...current, userMessage]);
+    setQuery("");
+
+    orca.mutate(
+      {
+        query: trimmed,
+        language: "en",
+        ...(latitude !== null && longitude !== null ? { latitude, longitude } : {}),
+        ...(conversationId ? { conversation_id: conversationId } : {}),
+      },
+      {
+        onSuccess: (response) => {
+          if (response.conversation_id) setConversationId(response.conversation_id);
+          const assistantText =
+            response.assistant_response ??
+            getStringValue(response.recommendation, "recommendation") ??
+            "ORCA returned structured data without a response message.";
+          setMessages((current) => [
+            ...current,
+            { id: `${Date.now()}-assistant`, role: "assistant", text: assistantText },
+          ]);
+        },
+      },
+    );
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Enter") handleAsk();
+  };
+
+  const startNewConversation = (): void => {
+    setConversationId(undefined);
+    setMessages([]);
+    setQuery("");
+    orca.reset();
   };
 
   const recommendation = result?.recommendation;
@@ -176,7 +216,10 @@ export default function Orca(): React.JSX.Element {
       </div>
 
       <section className="rounded-2xl border border-cyan-500/20 bg-slate-800 p-6 shadow-lg shadow-cyan-950/10">
-        <div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Ask ORCA</h2></div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Ask ORCA</h2></div>
+          {messages.length > 0 && <button type="button" onClick={startNewConversation} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 transition hover:border-cyan-500/40 hover:text-cyan-300">New conversation</button>}
+        </div>
         <p className="mt-2 text-sm text-slate-400">Ask about ocean conditions, fishing suitability, safety, or marine observations.</p>
         <div className="mt-5 flex flex-col gap-3 md:flex-row">
           <input type="text" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="e.g. Is it safe to go fishing near Mumbai tomorrow?" className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-400" />
@@ -184,6 +227,21 @@ export default function Orca(): React.JSX.Element {
         </div>
         <div className="mt-4 flex flex-wrap gap-2">{["Fishing conditions near Mumbai", "Ocean safety tomorrow", "Best conditions for fishing"].map((question) => <button key={question} type="button" onClick={() => setQuery(question)} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300">{question}</button>)}</div>
       </section>
+
+      {messages.length > 0 && <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
+        <div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Conversation</h2>{conversationId && <span className="text-xs text-slate-600">Session active</span>}</div>
+        <div className="mt-4 max-h-96 space-y-4 overflow-y-auto pr-1">
+          {messages.map((message) => (
+            <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === "user" ? "bg-cyan-500 text-slate-950" : "border border-slate-700 bg-slate-900 text-slate-200"}`}>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">{message.role === "user" ? "You" : "ORCA"}</p>
+                <p className="whitespace-pre-wrap">{message.text}</p>
+              </div>
+            </div>
+          ))}
+          {orca.isPending && <div className="flex justify-start"><div className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-400"><Loader2 size={16} className="mr-2 inline animate-spin" />ORCA is thinking...</div></div>}
+        </div>
+      </section>}
 
       <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2 text-white"><MapPin size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Select Ocean Location</h2></div><p className="mt-2 text-sm text-slate-400">Click anywhere on the map to send that latitude and longitude with your ORCA query.</p></div>{latitude !== null && longitude !== null && <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">Selected: {latitude.toFixed(4)}, {longitude.toFixed(4)}</div>}</div>
