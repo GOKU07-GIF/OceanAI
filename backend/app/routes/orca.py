@@ -24,6 +24,7 @@ class ORCAPlanResponse(BaseModel):
     plan: list[dict[str, str]]
     agent_results: list[dict]
     evidence: list[dict]
+    risk_assessment: dict
     errors: list[str]
 
 
@@ -54,5 +55,6 @@ def create_orca_plan(
         "plan": result.get("plan", []),
         "agent_results": result.get("agent_results", []),
         "evidence": result.get("evidence", []),
+        "risk_assessment": result.get("risk_assessment", {}),
         "errors": result.get("errors", []),
     }
