@@ -113,7 +113,12 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
 
     marine_result = marine_provider.fetch(
         request=marine_request,
-        provider_order=("incois", "copernicus", "mosdac"),
+        provider_order=(
+            "incois",
+            "copernicus",
+            "copernicus_chlorophyll",
+            "mosdac",
+        ),
     )
 
     marine_data = marine_result.get("data")
@@ -136,7 +141,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         updates["evidence"].append(marine_data)
 
     # PFZ is an official advisory service. Return exact point data when the
-    # public response exposes it; otherwise preserve the advisory metadata and
+    # public response exposes it; otherwise preserve advisory metadata and a
     # warning rather than inferring a fishing location.
     if is_fishing_query:
         pfz_tool = tool_registry.get("get_pfz_advisory")
