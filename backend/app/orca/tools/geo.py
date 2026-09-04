@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -58,6 +59,6 @@ def reverse_geocode(*, latitude: float, longitude: float) -> dict[str, Any]:
             "country": address.get("country"),
             "country_code": address.get("country_code"),
         },
-        "retrieved_at": data.get("name") is not None and None or None,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "note": "Boundary, restriction and routing claims require dedicated GIS data; they are not inferred here.",
     }
