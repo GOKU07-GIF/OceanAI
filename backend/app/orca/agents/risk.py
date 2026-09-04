@@ -70,12 +70,34 @@ def _extract_ocean(observations: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _extract_marine_forecast(agent_results: list[dict[str, Any]]) -> dict[str, Any]:
+    values: dict[str, list[float]] = {
+        "wave_height_m": [],
+        "wave_period_s": [],
+    }
+
+    for result in agent_results:
+        if result.get("agent") != "ocean" or result.get("status") != "success":
+            continue
+        conditions = result.get("conditions")
+        if not isinstance(conditions, dict):
+            continue
+        for key in values:
+            value = conditions.get(key)
+            if isinstance(value, (int, float)):
+                values[key].append(float(value))
+
+    return {
+        "max_wave_height_m": max(values["wave_height_m"]) if values["wave_height_m"] else None,
+        "min_wave_period_s": min(values["wave_period_s"]) if values["wave_period_s"] else None,
+    }
+
+
 def run_risk_agent(state: ORCAState) -> dict[str, Any]:
     """Assess marine risk using explicit prototype rules over collected evidence.
 
-    This is intentionally deterministic. It does not invent missing wave/current/
-    boundary data; unavailable dimensions reduce confidence and are reported as
-    limitations instead of being treated as safe.
+    This remains deterministic. Missing or unavailable safety dimensions are
+    reported rather than interpreted as safe.
     """
     agent_results = state.get("agent_results", [])
 
@@ -140,25 +162,43 @@ def run_risk_agent(state: ORCAState) -> dict[str, Any]:
     else:
         limitations.append("No nearby OceanAI observation was available for water-quality context.")
 
-    # The current vertical slice does not yet have verified wave, swell,
-    # current, vessel, or maritime-boundary evidence. Never assume safety.
+    marine_forecast = _extract_marine_forecast(agent_results)
+    if marine_forecast["max_wave_height_m"] is not None:
+        dimensions_available += 1
+        wave_height = marine_forecast["max_wave_height_m"]
+        if wave_height >= 3.0:
+            score += 4
+            factors.append("Marine forecast wave height reaches at least 3.0 m.")
+        elif wave_height >= 2.0:
+            score += 2
+            factors.append("Marine forecast wave height reaches at least 2.0 m.")
+        elif wave_height >= 1.5:
+            score += 1
+            factors.append("Marine forecast wave height reaches at least 1.5 m.")
+    else:
+        limitations.append("Verified wave-height forecast evidence is unavailable.")
+
+    if marine_forecast["min_wave_period_s"] is not None:
+        dimensions_available += 1
+
+    # Still not covered by the current first marine adapter.
     limitations.extend([
-        "Wave and swell conditions are not yet part of this risk calculation.",
         "Maritime restriction/geofence data is not yet part of this risk calculation.",
+        "Vessel-specific limits are not yet part of this risk calculation.",
     ])
 
-    if score >= 7:
+    if score >= 9:
         level = "CRITICAL"
-    elif score >= 5:
+    elif score >= 6:
         level = "HIGH"
     elif score >= 3:
         level = "MODERATE"
     else:
         level = "LOW"
 
-    if dimensions_available == 0:
+    if dimensions_available <= 1:
         confidence = "LOW"
-    elif dimensions_available == 1:
+    elif dimensions_available == 2:
         confidence = "MEDIUM"
     else:
         confidence = "MEDIUM-HIGH"
