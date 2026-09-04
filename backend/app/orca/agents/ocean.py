@@ -135,25 +135,32 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     if isinstance(marine_data, dict):
         updates["evidence"].append(marine_data)
 
-    # PFZ is a separate official advisory service. At this stage we verify
-    # availability and preserve the official reference without inventing
-    # location-specific PFZ coordinates.
+    # PFZ is an official advisory service. Return exact point data when the
+    # public response exposes it; otherwise preserve the advisory metadata and
+    # warning rather than inferring a fishing location.
     if is_fishing_query:
-        pfz_tool = tool_registry.get("get_pfz_service_status")
-        pfz_result = pfz_tool()
-        updates["agent_results"].append(
-            {
-                "agent": "ocean",
-                "status": pfz_result.get("status", "unavailable"),
-                "source": pfz_result.get("source", "INCOIS"),
-                "dataset": pfz_result.get("dataset", "Potential Fishing Zone Advisory WebGIS"),
-                "pfz_service": pfz_result,
-            }
-        )
-        if pfz_result.get("status") == "success":
-            updates["evidence"].append(pfz_result)
-        for error in pfz_result.get("errors", []):
-            updates["errors"].append(f"PFZ: {error}")
+        pfz_tool = tool_registry.get("get_pfz_advisory")
+        pfz_result = pfz_tool(language=state.get("language", "en"))
+        pfz_agent_result = {
+            "agent": "ocean",
+            "capability": "pfz",
+            "status": pfz_result.get("status", "unavailable"),
+            "source": pfz_result.get("source", "INCOIS"),
+            "dataset": pfz_result.get("dataset", "PFZ Text Advisory"),
+            "advisory_date": pfz_result.get("advisory_date"),
+            "valid_until": pfz_result.get("valid_until"),
+            "locations": pfz_result.get("locations", []),
+            "pfz_available": pfz_result.get("pfz_available", False),
+            "quality": pfz_result.get("quality"),
+            "warning": pfz_result.get("location_warning"),
+            "webgis_url": pfz_result.get("webgis_url"),
+            "text_url": pfz_result.get("text_url"),
+            "errors": [pfz_result["error"]] if pfz_result.get("error") else [],
+        }
+        updates["agent_results"].append(pfz_agent_result)
+        updates["evidence"].append(pfz_result)
+        if pfz_result.get("error"):
+            updates["errors"].append(f"INCOIS PFZ: {pfz_result['error']}")
 
     if marine_result.get("errors"):
         updates["errors"].extend(
