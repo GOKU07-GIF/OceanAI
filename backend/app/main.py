@@ -24,6 +24,7 @@ from app.routes.ai import router as ai_router
 from app.routes.device import router as device_router
 from app.routes.sensor_reading import router as sensor_reading_router
 from app.routes.sos import router as sos_router
+from app.routes.orca import router as orca_router
 from app.routes import alert
 
 
@@ -108,6 +109,7 @@ app.include_router(ai_router)
 app.include_router(device_router)
 app.include_router(sensor_reading_router)
 app.include_router(sos_router)
+app.include_router(orca_router)
 app.include_router(alert.router)
 
 # -----------------------------------------------------------------------------
