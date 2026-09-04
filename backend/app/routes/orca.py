@@ -22,6 +22,9 @@ class ORCAPlanRequest(BaseModel):
 class ORCAPlanResponse(BaseModel):
     activity: str
     plan: list[dict[str, str]]
+    agent_results: list[dict]
+    evidence: list[dict]
+    errors: list[str]
 
 
 @router.post("/plan", response_model=ORCAPlanResponse)
@@ -30,8 +33,6 @@ def create_orca_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Keep a DB dependency in the route now so data-source tools can later
-    # reuse the same request-scoped session without changing the API contract.
     _ = db
 
     location = None
@@ -52,4 +53,7 @@ def create_orca_plan(
     return {
         "activity": result.get("activity", "general_marine_information"),
         "plan": result.get("plan", []),
+        "agent_results": result.get("agent_results", []),
+        "evidence": result.get("evidence", []),
+        "errors": result.get("errors", []),
     }
