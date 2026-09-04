@@ -50,10 +50,6 @@ function formatValue(value: unknown): string {
   }
 }
 
-function getEvidenceList(response: OrcaResponse | undefined): OrcaEvidence[] {
-  return response?.evidence ?? [];
-}
-
 function getObjectValue(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
   return key in value ? (value as Record<string, unknown>)[key] : undefined;
@@ -71,13 +67,52 @@ function collectStrings(value: unknown): string[] {
   return [];
 }
 
-function getEvidenceValue(evidence: OrcaEvidence[], names: string[]): string {
-  const match = evidence.find((item) => {
+function collectEvidenceRecords(value: unknown): OrcaEvidence[] {
+  if (Array.isArray(value)) return value.flatMap(collectEvidenceRecords);
+  if (typeof value !== "object" || value === null) return [];
+
+  const object = value as Record<string, unknown>;
+  const records: OrcaEvidence[] = [];
+  if (typeof object.metric === "string" || "value" in object) records.push(object as OrcaEvidence);
+
+  for (const child of Object.values(object)) records.push(...collectEvidenceRecords(child));
+  return records;
+}
+
+function findNestedValue(value: unknown, names: string[]): unknown {
+  const wanted = names.map((name) => name.toLowerCase());
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedValue(item, names);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+
+  const object = value as Record<string, unknown>;
+  for (const [key, item] of Object.entries(object)) {
+    const normalized = key.toLowerCase().replaceAll("-", "_");
+    if (wanted.some((name) => normalized === name || normalized.includes(name))) return item;
+  }
+  for (const item of Object.values(object)) {
+    const found = findNestedValue(item, names);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function getEvidenceValue(response: OrcaResponse | undefined, names: string[]): string {
+  if (!response) return "Unavailable";
+  const records = collectEvidenceRecords(response.evidence);
+  const recordMatch = records.find((item) => {
     const metric = item.metric?.toLowerCase();
     return metric ? names.some((name) => metric.includes(name)) : false;
   });
-  if (!match || match.value == null) return "Unavailable";
-  return formatValue(match.value);
+  if (recordMatch?.value != null) return formatValue(recordMatch.value);
+
+  const nestedValue = findNestedValue(response.evidence, names);
+  return nestedValue == null ? "Unavailable" : formatValue(nestedValue);
 }
 
 export default function Orca(): React.JSX.Element {
@@ -86,7 +121,6 @@ export default function Orca(): React.JSX.Element {
   const [longitude, setLongitude] = useState<number | null>(null);
   const orca = useOrca();
   const result = orca.data;
-  const evidence = getEvidenceList(result);
 
   const handleLocationSelect = (selectedLatitude: number, selectedLongitude: number): void => {
     setLatitude(selectedLatitude);
@@ -112,8 +146,7 @@ export default function Orca(): React.JSX.Element {
   const recommendationText = getStringValue(recommendation, "recommendation");
   const recommendationConfidence = getStringValue(recommendation, "confidence");
   const recommendationRisk = getStringValue(recommendation, "risk_level");
-  const recommendationFactors = getObjectValue(recommendation, "factors");
-  const recommendationFactorList = collectStrings(recommendationFactors);
+  const recommendationFactorList = collectStrings(getObjectValue(recommendation, "factors"));
 
   const riskAssessment = result?.risk_assessment;
   const riskLevel = getStringValue(riskAssessment, "level") ?? getStringValue(riskAssessment, "risk_level") ?? recommendationRisk;
@@ -125,21 +158,19 @@ export default function Orca(): React.JSX.Element {
     recommendationDecision || recommendationText || recommendationConfidence || recommendationRisk,
   );
 
-  const seaTemperature = getEvidenceValue(evidence, ["sea temperature", "sst", "temperature"]);
-  const waveHeight = getEvidenceValue(evidence, ["wave height", "wave_height", "waves"]);
-  const windSpeed = getEvidenceValue(evidence, ["wind speed", "wind_speed", "wind"]);
-  const evidenceLocation = getEvidenceValue(evidence, ["location", "latitude", "longitude"]);
+  const seaTemperature = getEvidenceValue(result, ["sea_temperature", "sst_c", "temperature"]);
+  const waveHeight = getEvidenceValue(result, ["wave_height", "wave_height_m"]);
+  const windSpeed = getEvidenceValue(result, ["wind_speed", "wind_speed_m_s"]);
+  const evidenceLocation = getEvidenceValue(result, ["location"]);
   const selectedLocation =
     latitude !== null && longitude !== null ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : evidenceLocation;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-cyan-500/10 p-3 text-cyan-400"><Bot size={30} /></div>
-            <div><h1 className="text-3xl font-bold text-white">ORCA Assistant</h1><p className="mt-1 text-sm text-slate-400">Ocean Research & Catch Advisory</p></div>
-          </div>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-cyan-500/10 p-3 text-cyan-400"><Bot size={30} /></div>
+          <div><h1 className="text-3xl font-bold text-white">ORCA Assistant</h1><p className="mt-1 text-sm text-slate-400">Ocean Research & Catch Advisory</p></div>
         </div>
         <div className="flex items-center gap-2 self-start rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-medium text-green-400 md:self-auto"><span className="h-2 w-2 rounded-full bg-green-400" /> Ready</div>
       </div>
@@ -174,7 +205,7 @@ export default function Orca(): React.JSX.Element {
       <section>
         <div className="mb-4"><h2 className="text-xl font-semibold text-white">Environment Snapshot</h2><p className="mt-1 text-sm text-slate-400">Only verified environmental evidence returned by ORCA is shown here.</p></div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"><ConditionCard label="Sea Temperature" value={seaTemperature} unit="°C" icon={<Thermometer size={22} />} /><ConditionCard label="Wave Height" value={waveHeight} unit="m" icon={<Waves size={22} />} /><ConditionCard label="Wind Speed" value={windSpeed} unit="m/s" icon={<Wind size={22} />} /><ConditionCard label="Location" value={selectedLocation} icon={<MapPin size={22} />} /></div>
-        {evidence.length > 0 && <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-800 p-5"><h3 className="font-semibold text-white">Evidence Returned by ORCA</h3><div className="mt-4 space-y-3">{evidence.map((item, index) => <div key={`${item.metric ?? item.source ?? "evidence"}-${index}`} className="rounded-xl bg-slate-900/70 p-4"><div className="flex flex-wrap items-center gap-2 text-sm">{item.metric && <span className="font-medium text-cyan-300">{item.metric}</span>}{item.value != null && <span className="text-white">{formatValue(item.value)}</span>}{item.unit && <span className="text-slate-500">{item.unit}</span>}</div>{item.source && <p className="mt-1 text-xs text-slate-500">Source: {item.source}</p>}{item.timestamp && <p className="mt-1 text-xs text-slate-600">Time: {item.timestamp}</p>}</div>)}</div></div>}
+        {result?.evidence && <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-800 p-5"><h3 className="font-semibold text-white">Evidence Returned by ORCA</h3><div className="mt-4 space-y-3">{collectEvidenceRecords(result.evidence).map((item, index) => <div key={`${item.metric ?? item.source ?? "evidence"}-${index}`} className="rounded-xl bg-slate-900/70 p-4"><div className="flex flex-wrap items-center gap-2 text-sm">{item.metric && <span className="font-medium text-cyan-300">{item.metric}</span>}{item.value != null && <span className="text-white">{formatValue(item.value)}</span>}{item.unit && <span className="text-slate-500">{item.unit}</span>}</div>{item.source && <p className="mt-1 text-xs text-slate-500">Source: {item.source}</p>}{item.timestamp && <p className="mt-1 text-xs text-slate-600">Time: {item.timestamp}</p>}</div>)}</div></div>}
       </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
