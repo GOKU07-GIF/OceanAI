@@ -16,7 +16,7 @@ greenlet==3.5.4
 h11==0.16.0
 idna==3.18
 joblib==1.5.3
-langgraph
+langgraph==1.2.11
 narwhals==2.24.0
 numpy==2.5.1
 pandas==3.0.5
