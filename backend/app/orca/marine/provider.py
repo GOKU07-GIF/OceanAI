@@ -4,6 +4,7 @@ from typing import Any, Protocol, Sequence
 
 from app.orca.marine.incois import incois_provider
 from app.orca.marine.copernicus import copernicus_provider
+from app.orca.marine.copernicus_chlorophyll import copernicus_chlorophyll_provider
 from app.orca.marine.models import MARINE_VARIABLES, MarineConditions, MarineDataRequest
 
 
@@ -91,8 +92,6 @@ class CompositeMarineProvider:
                 })
                 continue
 
-            # A provider can contribute more than one canonical dataset in one
-            # request. Copernicus uses this for waves + ocean-colour products.
             data_candidates: list[dict[str, Any]] = []
             data = result.get("data")
             if isinstance(data, dict):
@@ -213,4 +212,5 @@ def normalize_marine_conditions(
 marine_provider_registry = MarineProviderRegistry()
 marine_provider_registry.register(incois_provider)
 marine_provider_registry.register(copernicus_provider)
+marine_provider_registry.register(copernicus_chlorophyll_provider)
 marine_provider = CompositeMarineProvider(marine_provider_registry)
