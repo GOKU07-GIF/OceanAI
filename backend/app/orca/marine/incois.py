@@ -52,12 +52,12 @@ class INCOISERDDAPSSTProvider:
             }
 
         # ERDDAP griddap supports [last] for the most recent time value and
-        # parenthesized dimension values for the closest available grid point.
+        # parenthesized coordinate values for the nearest available grid cell.
         query = (
             f"{INCOIS_SST_VARIABLE}"
             f"[last]"
-            f"[{latitude}]"
-            f"[{longitude}]"
+            f"[({latitude})]"
+            f"[({longitude})]"
         )
         url = (
             f"{self.base_url}/griddap/"
