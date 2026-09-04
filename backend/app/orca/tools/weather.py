@@ -32,6 +32,14 @@ def _filter_forecast_days(
     if start is None or end is None:
         return forecast_days
 
+    # WeatherAPI's hourly timestamps are local wall-clock times without an
+    # explicit offset. The resolved ORCA window is also expressed in the
+    # target location's local timezone, so compare their wall-clock values.
+    if start.tzinfo is not None:
+        start = start.replace(tzinfo=None)
+    if end.tzinfo is not None:
+        end = end.replace(tzinfo=None)
+
     filtered_days: list[dict[str, Any]] = []
     for day in forecast_days:
         filtered_hours: list[dict[str, Any]] = []
