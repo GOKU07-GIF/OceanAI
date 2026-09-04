@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Sequence
 
+from app.orca.marine.incois import incois_provider
 from app.orca.marine.models import MARINE_VARIABLES, MarineConditions, MarineDataRequest
 
 
@@ -46,7 +47,12 @@ class CompositeMarineProvider:
         request: MarineDataRequest,
         provider_order: Sequence[str],
     ) -> dict[str, Any]:
-        missing = [variable for variable in request.get("variables", []) if variable in MARINE_VARIABLES]
+        requested = [
+            variable
+            for variable in request.get("variables", [])
+            if variable in MARINE_VARIABLES
+        ]
+        missing = list(requested)
         errors: list[dict[str, str]] = []
 
         providers = self.registry.ordered(provider_order)
@@ -138,4 +144,5 @@ def normalize_marine_conditions(
 
 
 marine_provider_registry = MarineProviderRegistry()
+marine_provider_registry.register(incois_provider)
 marine_provider = CompositeMarineProvider(marine_provider_registry)
