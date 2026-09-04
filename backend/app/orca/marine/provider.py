@@ -13,7 +13,7 @@ class MarineProvider(Protocol):
     name: str
 
     def fetch(self, request: MarineDataRequest) -> dict[str, Any]:
-        """Return a provider result using the canonical ORCA marine shape."""
+        """Return a provider result using canonical ORCA marine shapes."""
         ...
 
 
@@ -71,14 +71,9 @@ class CompositeMarineProvider:
             }
 
         for provider in providers:
-            # Once every requested variable is satisfied, there is no reason
-            # to spend network time querying lower-priority providers.
             if requested and not missing:
                 break
 
-            # Avoid asking a provider for variables it cannot supply when the
-            # provider has a known capability map. Unknown providers still get
-            # the full request.
             provider_request = dict(request)
             if missing:
                 provider_request["variables"] = list(missing)
@@ -96,35 +91,57 @@ class CompositeMarineProvider:
                 })
                 continue
 
+            # A provider can contribute more than one canonical dataset in one
+            # request. Copernicus uses this for waves + ocean-colour products.
+            data_candidates: list[dict[str, Any]] = []
             data = result.get("data")
-            if not isinstance(data, dict):
+            if isinstance(data, dict):
+                data_candidates.append(data)
+            for item in result.get("data_parts", []):
+                if isinstance(item, dict):
+                    data_candidates.append(item)
+
+            if not data_candidates:
                 errors.append({
                     "source": provider.name,
-                    "error": "Provider returned success without a canonical data object.",
+                    "error": "Provider returned success without canonical data.",
                 })
                 continue
 
-            normalized = normalize_marine_conditions(data, fallback_source=provider.name)
-            contribution = {
-                "provider": provider.name,
-                "source": normalized.get("source", provider.name),
-                "dataset": normalized.get("dataset", "unknown"),
-                "type": normalized.get("type", "mixed"),
-                "variables": [],
-            }
+            for candidate in data_candidates:
+                normalized = normalize_marine_conditions(
+                    candidate,
+                    fallback_source=provider.name,
+                )
+                contribution = {
+                    "provider": provider.name,
+                    "source": normalized.get("source", provider.name),
+                    "dataset": normalized.get("dataset", "unknown"),
+                    "type": normalized.get("type", "mixed"),
+                    "variables": [],
+                }
 
-            for variable in missing:
-                value = normalized.get(variable)
-                if value is not None:
-                    merged_data[variable] = value
-                    contribution["variables"].append(variable)
+                for variable in list(missing):
+                    value = normalized.get(variable)
+                    if value is not None:
+                        merged_data[variable] = value
+                        contribution["variables"].append(variable)
 
-            if contribution["variables"]:
-                # Store source metadata separately so fields from different
-                # providers never masquerade as if they came from one dataset.
-                contributions.append(contribution)
+                if contribution["variables"]:
+                    contributions.append(contribution)
 
-            missing = [variable for variable in missing if variable not in merged_data]
+                missing = [
+                    variable
+                    for variable in missing
+                    if variable not in merged_data
+                ]
+
+            for detail in result.get("errors", []):
+                if isinstance(detail, dict):
+                    errors.append({
+                        "source": str(detail.get("source", provider.name)),
+                        "error": str(detail.get("error", "provider error")),
+                    })
 
         if not merged_data:
             return {
@@ -134,7 +151,6 @@ class CompositeMarineProvider:
                 "errors": errors,
             }
 
-        # Canonical request context plus field-level provider contributions.
         combined: MarineConditions = {
             "source": "ORCA marine composite",
             "dataset": "composite",
