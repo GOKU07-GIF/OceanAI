@@ -3,6 +3,7 @@ import {
   Database,
   Map,
   BrainCircuit,
+  Bot,
   Bell,
   FileText,
   Settings,
@@ -38,6 +39,11 @@ const menuItems: MenuItem[] = [
     title: "AI Analytics",
     path: "/dashboard/analytics",
     icon: BrainCircuit,
+  },
+  {
+    title: "ORCA Assistant",
+    path: "/dashboard/orca",
+    icon: Bot,
   },
   {
     title: "Alerts",
