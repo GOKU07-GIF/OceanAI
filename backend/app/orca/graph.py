@@ -8,6 +8,7 @@ from app.orca.agents.decision import run_decision_agent
 from app.orca.agents.geo import run_geo_agent
 from app.orca.agents.ocean import run_ocean_agent
 from app.orca.agents.planner import plan_query
+from app.orca.agents.response import run_response_agent
 from app.orca.agents.risk import run_risk_agent
 from app.orca.agents.weather import run_weather_agent
 from app.orca.state import ORCAState
@@ -56,18 +57,20 @@ def execute_selected_agents(state: ORCAState) -> dict[str, Any]:
 
 
 def build_orca_graph():
-    """Build the complete first ORCA decision-support graph slice."""
+    """Build the complete first ORCA conversational decision-support slice."""
     graph = StateGraph(ORCAState)
     graph.add_node("planner", plan_query)
     graph.add_node("specialists", execute_selected_agents)
     graph.add_node("risk", run_risk_agent)
     graph.add_node("decision", run_decision_agent)
+    graph.add_node("response", run_response_agent)
 
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "specialists")
     graph.add_edge("specialists", "risk")
     graph.add_edge("risk", "decision")
-    graph.add_edge("decision", END)
+    graph.add_edge("decision", "response")
+    graph.add_edge("response", END)
 
     return graph.compile()
 
