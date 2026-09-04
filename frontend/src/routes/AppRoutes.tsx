@@ -12,6 +12,7 @@ import Dashboard from "../pages/dashboard/Dashboard";
 import OceanData from "../pages/ocean-data/OceanData";
 import Map from "../pages/map/Map";
 import Analytics from "../pages/analytics/Analytics";
+import Orca from "../pages/orca/Orca";
 import Alerts from "../pages/alerts/Alerts";
 import Reports from "../pages/reports/Reports";
 import Settings from "../pages/Settings/Settings";
@@ -71,6 +72,12 @@ export default function AppRoutes(): React.JSX.Element {
           <Route
             path="analytics"
             element={<Analytics />}
+          />
+
+          {/* ORCA Assistant */}
+          <Route
+            path="orca"
+            element={<Orca />}
           />
 
           {/* Alerts */}
