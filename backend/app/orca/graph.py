@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from app.orca.agents.decision import run_decision_agent
 from app.orca.agents.geo import run_geo_agent
 from app.orca.agents.ocean import run_ocean_agent
 from app.orca.agents.planner import plan_query
@@ -22,11 +23,8 @@ _SPECIALISTS = {
 def execute_selected_agents(state: ORCAState) -> dict[str, Any]:
     """Execute only agents selected by the planner and merge their results.
 
-    We keep the first ORCA vertical slice deterministic and sequential. This
-    gives the risk stage a complete state barrier without racing or invoking
-    the risk calculation multiple times. The individual agents remain
-    isolated and can later be fanned out in parallel when their contracts
-    support it.
+    The first vertical slice remains deterministic and sequential so every
+    specialist completes before the shared evidence reaches the risk stage.
     """
     working_state: ORCAState = dict(state)
     updates: dict[str, Any] = {
@@ -58,16 +56,18 @@ def execute_selected_agents(state: ORCAState) -> dict[str, Any]:
 
 
 def build_orca_graph():
-    """Build the first complete ORCA decision-support graph slice."""
+    """Build the complete first ORCA decision-support graph slice."""
     graph = StateGraph(ORCAState)
     graph.add_node("planner", plan_query)
     graph.add_node("specialists", execute_selected_agents)
     graph.add_node("risk", run_risk_agent)
+    graph.add_node("decision", run_decision_agent)
 
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "specialists")
     graph.add_edge("specialists", "risk")
-    graph.add_edge("risk", END)
+    graph.add_edge("risk", "decision")
+    graph.add_edge("decision", END)
 
     return graph.compile()
 
