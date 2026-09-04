@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from app.orca.tools.weather import get_weather_forecast
+
 
 Tool = Callable[..., dict[str, Any]]
 
@@ -28,6 +30,5 @@ class ORCAToolRegistry:
         return sorted(self._tools)
 
 
-# The registry is intentionally empty for now. Data-source adapters will be
-# added one by one after their access method and provenance are verified.
 tool_registry = ORCAToolRegistry()
+tool_registry.register("get_weather_forecast", get_weather_forecast)
