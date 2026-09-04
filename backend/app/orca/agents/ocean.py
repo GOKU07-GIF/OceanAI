@@ -10,8 +10,15 @@ from app.orca.state import ORCAState
 from app.orca.tools.ocean import get_ocean_conditions
 
 
+_MARINE_SAFETY_VARIABLES = [
+    "sst_c",
+    "wave_height_m",
+    "wave_period_s",
+]
+
+
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
-    """Collect local observations plus verified marine-source context."""
+    """Collect local observations plus authoritative marine-source context."""
     location = state.get("location")
     db = state.get("db")
     if not location:
@@ -76,9 +83,16 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
         "longitude": location["longitude"],
-        "variables": ["sst_c"],
+        "variables": _MARINE_SAFETY_VARIABLES,
         "radius_km": 50.0,
     }
+
+    if state.get("requested_time"):
+        requested_time = state["requested_time"]
+        if requested_time.get("start"):
+            marine_request["start_time"] = requested_time["start"]
+        if requested_time.get("end"):
+            marine_request["end_time"] = requested_time["end"]
 
     marine_result = marine_provider.fetch(
         request=marine_request,
@@ -89,9 +103,10 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     marine_agent_result: dict[str, Any] = {
         "agent": "ocean",
         "status": marine_result.get("status", "unavailable"),
-        "source": marine_data.get("source") if isinstance(marine_data, dict) else "INCOIS",
-        "dataset": marine_data.get("dataset") if isinstance(marine_data, dict) else "INCOIS marine data",
+        "source": marine_data.get("source") if isinstance(marine_data, dict) else "marine provider",
+        "dataset": marine_data.get("dataset") if isinstance(marine_data, dict) else "marine data",
         "missing_variables": marine_result.get("missing_variables", []),
+        "provider_contributions": marine_result.get("provider_contributions", []),
         "errors": marine_result.get("errors", []),
     }
     if isinstance(marine_data, dict):
