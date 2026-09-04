@@ -60,6 +60,16 @@ function getEvidenceList(response: OrcaResponse | undefined): OrcaEvidence[] {
   return response.evidence;
 }
 
+function getObjectValue(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  return key in value ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+function getStringValue(value: unknown, key: string): string | undefined {
+  const item = getObjectValue(value, key);
+  return typeof item === "string" ? item : undefined;
+}
+
 export default function Orca(): React.JSX.Element {
   const [query, setQuery] = useState("");
   const orca = useOrca();
@@ -81,9 +91,29 @@ export default function Orca(): React.JSX.Element {
   };
 
   const recommendation = result?.recommendation;
+  const recommendationDecision = getStringValue(recommendation, "decision");
+  const recommendationText = getStringValue(recommendation, "recommendation");
+  const recommendationConfidence = getStringValue(recommendation, "confidence");
+  const recommendationRisk = getStringValue(recommendation, "risk_level");
+  const recommendationFactors = getObjectValue(recommendation, "factors");
+  const recommendationFactorList = Array.isArray(recommendationFactors)
+    ? recommendationFactors.filter((factor): factor is string => typeof factor === "string")
+    : [];
+
   const risk = result?.risk;
   const riskObject = typeof risk === "object" && risk !== null ? risk : undefined;
   const riskFactors = Array.isArray(riskObject?.factors) ? riskObject.factors : [];
+  const effectiveRiskFactors =
+    riskFactors.length > 0 ? riskFactors : recommendationFactorList;
+  const effectiveRiskLevel =
+    riskObject && typeof riskObject.level === "string"
+      ? riskObject.level
+      : recommendationRisk;
+
+  const responseText = result?.response ?? result?.answer;
+  const hasStructuredRecommendation = Boolean(
+    recommendationDecision || recommendationText || recommendationConfidence || recommendationRisk,
+  );
 
   return (
     <div className="space-y-6">
@@ -166,7 +196,11 @@ export default function Orca(): React.JSX.Element {
           <div>
             <h2 className="font-semibold text-white">ORCA Recommendation</h2>
             <p className="text-xs text-slate-500">
-              {orca.isPending ? "Analyzing your request" : result ? "Latest ORCA response" : "Waiting for your question"}
+              {orca.isPending
+                ? "Analyzing your request"
+                : result
+                  ? "Latest ORCA response"
+                  : "Waiting for your question"}
             </p>
           </div>
         </div>
@@ -190,9 +224,58 @@ export default function Orca(): React.JSX.Element {
             </div>
           )}
 
-          {!orca.isPending && !orca.isError && result && (
+          {!orca.isPending && !orca.isError && result && hasStructuredRecommendation && (
+            <div className="space-y-4">
+              {recommendationDecision && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
+                    {recommendationDecision.replaceAll("_", " ")}
+                  </span>
+                  {recommendationConfidence && (
+                    <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">
+                      Confidence: {recommendationConfidence}
+                    </span>
+                  )}
+                  {recommendationRisk && (
+                    <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">
+                      Risk: {recommendationRisk}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {recommendationText && (
+                <p className="text-sm leading-6 text-slate-200">{recommendationText}</p>
+              )}
+
+              {recommendationFactorList.length > 0 && (
+                <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Why ORCA reached this decision
+                  </p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {recommendationFactorList.map((factor, index) => (
+                      <li key={`${factor}-${index}`} className="flex gap-2">
+                        <span className="text-cyan-400">•</span>
+                        <span>{factor}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!orca.isPending && !orca.isError && result && !hasStructuredRecommendation && responseText && (
             <div className="whitespace-pre-wrap text-sm leading-6 text-slate-200">
-              {result.response ?? result.answer ?? "ORCA returned no response."}
+              {responseText}
+            </div>
+          )}
+
+          {!orca.isPending && !orca.isError && result && !hasStructuredRecommendation && !responseText && (
+            <div className="text-center">
+              <Compass size={32} className="mx-auto text-slate-600" />
+              <p className="mt-3 text-slate-400">ORCA returned data, but no displayable response text.</p>
             </div>
           )}
 
@@ -250,7 +333,10 @@ export default function Orca(): React.JSX.Element {
             <h3 className="font-semibold text-white">Evidence Returned by ORCA</h3>
             <div className="mt-4 space-y-3">
               {evidence.map((item, index) => (
-                <div key={`${item.metric ?? item.source ?? "evidence"}-${index}`} className="rounded-xl bg-slate-900/70 p-4">
+                <div
+                  key={`${item.metric ?? item.source ?? "evidence"}-${index}`}
+                  className="rounded-xl bg-slate-900/70 p-4"
+                >
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     {item.metric && <span className="font-medium text-cyan-300">{item.metric}</span>}
                     {item.value != null && <span className="text-white">{formatValue(item.value)}</span>}
@@ -276,9 +362,11 @@ export default function Orca(): React.JSX.Element {
             ORCA combines available environmental indicators to support the fishing recommendation.
           </p>
           <div className="mt-5 rounded-xl bg-slate-900/70 p-4 text-sm text-slate-300">
-            {result?.recommendation
-              ? formatValue(recommendation)
-              : "Recommendation will appear after ORCA receives a query."}
+            {recommendationText
+              ? recommendationText
+              : recommendation
+                ? formatValue(recommendation)
+                : "Recommendation will appear after ORCA receives a query."}
           </div>
         </section>
 
@@ -288,12 +376,16 @@ export default function Orca(): React.JSX.Element {
             <h2 className="text-xl font-semibold text-white">Risk Factors</h2>
           </div>
           <div className="mt-4 space-y-3 text-sm text-slate-400">
-            {riskFactors.length > 0 ? (
-              riskFactors.map((factor, index) => (
+            {effectiveRiskFactors.length > 0 ? (
+              effectiveRiskFactors.map((factor, index) => (
                 <div key={`${factor}-${index}`} className="rounded-lg bg-slate-900/60 p-3">
                   {factor}
                 </div>
               ))
+            ) : effectiveRiskLevel ? (
+              <div className="rounded-lg bg-slate-900/60 p-3">
+                Risk level: <span className="font-semibold text-white">{effectiveRiskLevel}</span>
+              </div>
             ) : result?.risk ? (
               <div className="whitespace-pre-wrap rounded-lg bg-slate-900/60 p-3">
                 {formatValue(risk)}
