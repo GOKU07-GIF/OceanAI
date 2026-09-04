@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol, Sequence
 
 from app.orca.marine.incois import incois_provider
+from app.orca.marine.copernicus import copernicus_provider
 from app.orca.marine.models import MARINE_VARIABLES, MarineConditions, MarineDataRequest
 
 
@@ -36,7 +37,7 @@ class MarineProviderRegistry:
 
 
 class CompositeMarineProvider:
-    """Try configured providers in order and preserve provenance/failures."""
+    """Try providers in order, merge fields, and preserve provenance/failures."""
 
     def __init__(self, registry: MarineProviderRegistry) -> None:
         self.registry = registry
@@ -54,6 +55,8 @@ class CompositeMarineProvider:
         ]
         missing = list(requested)
         errors: list[dict[str, str]] = []
+        contributions: list[dict[str, Any]] = []
+        merged_data: dict[str, Any] = {}
 
         providers = self.registry.ordered(provider_order)
         if not providers:
@@ -68,8 +71,20 @@ class CompositeMarineProvider:
             }
 
         for provider in providers:
+            # Once every requested variable is satisfied, there is no reason
+            # to spend network time querying lower-priority providers.
+            if requested and not missing:
+                break
+
+            # Avoid asking a provider for variables it cannot supply when the
+            # provider has a known capability map. Unknown providers still get
+            # the full request.
+            provider_request = dict(request)
+            if missing:
+                provider_request["variables"] = list(missing)
+
             try:
-                result = provider.fetch(request)
+                result = provider.fetch(provider_request)
             except Exception as exc:  # pragma: no cover - defensive provider boundary
                 errors.append({"source": provider.name, "error": str(exc)})
                 continue
@@ -90,22 +105,58 @@ class CompositeMarineProvider:
                 continue
 
             normalized = normalize_marine_conditions(data, fallback_source=provider.name)
-            present = [key for key in missing if normalized.get(key) is not None]
-            remaining = [key for key in missing if key not in present]
-
-            return {
-                "status": "success",
-                "data": normalized,
-                "missing_variables": remaining,
-                "errors": errors,
+            contribution = {
                 "provider": provider.name,
+                "source": normalized.get("source", provider.name),
+                "dataset": normalized.get("dataset", "unknown"),
+                "type": normalized.get("type", "mixed"),
+                "variables": [],
             }
 
+            for variable in missing:
+                value = normalized.get(variable)
+                if value is not None:
+                    merged_data[variable] = value
+                    contribution["variables"].append(variable)
+
+            if contribution["variables"]:
+                # Store source metadata separately so fields from different
+                # providers never masquerade as if they came from one dataset.
+                contributions.append(contribution)
+
+            missing = [variable for variable in missing if variable not in merged_data]
+
+        if not merged_data:
+            return {
+                "status": "unavailable",
+                "data": None,
+                "missing_variables": missing or list(MARINE_VARIABLES),
+                "errors": errors,
+            }
+
+        # Canonical request context plus field-level provider contributions.
+        combined: MarineConditions = {
+            "source": "ORCA marine composite",
+            "dataset": "composite",
+            "type": "mixed",
+            "location": {
+                "latitude": float(request["latitude"]),
+                "longitude": float(request["longitude"]),
+            },
+            "quality": "mixed-provider",
+            "metadata": {
+                "provider_contributions": contributions,
+            },
+            **merged_data,
+        }
+
         return {
-            "status": "unavailable",
-            "data": None,
-            "missing_variables": missing or list(MARINE_VARIABLES),
+            "status": "success",
+            "data": combined,
+            "missing_variables": missing,
             "errors": errors,
+            "provider": contributions[0]["provider"] if len(contributions) == 1 else "composite",
+            "provider_contributions": contributions,
         }
 
 
@@ -145,4 +196,5 @@ def normalize_marine_conditions(
 
 marine_provider_registry = MarineProviderRegistry()
 marine_provider_registry.register(incois_provider)
+marine_provider_registry.register(copernicus_provider)
 marine_provider = CompositeMarineProvider(marine_provider_registry)
