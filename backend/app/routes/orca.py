@@ -21,6 +21,7 @@ class ORCAPlanRequest(BaseModel):
 
 class ORCAPlanResponse(BaseModel):
     activity: str
+    requested_time: dict[str, str] | None = None
     plan: list[dict[str, str]]
     agent_results: list[dict]
     evidence: list[dict]
@@ -55,6 +56,7 @@ def create_orca_plan(
 
     return {
         "activity": result.get("activity", "general_marine_information"),
+        "requested_time": result.get("requested_time"),
         "plan": result.get("plan", []),
         "agent_results": result.get("agent_results", []),
         "evidence": result.get("evidence", []),
