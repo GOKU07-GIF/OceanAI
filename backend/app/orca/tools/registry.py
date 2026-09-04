@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from app.orca.tools.ocean import get_ocean_conditions
 from app.orca.tools.weather import get_weather_forecast
 
 
@@ -32,3 +33,4 @@ class ORCAToolRegistry:
 
 tool_registry = ORCAToolRegistry()
 tool_registry.register("get_weather_forecast", get_weather_forecast)
+tool_registry.register("get_ocean_conditions", get_ocean_conditions)
