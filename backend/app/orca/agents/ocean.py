@@ -8,6 +8,7 @@ from app.orca.marine.models import MarineDataRequest
 from app.orca.marine.provider import marine_provider
 from app.orca.state import ORCAState
 from app.orca.tools.ocean import get_ocean_conditions
+from app.orca.tools.registry import tool_registry
 
 
 _MARINE_SAFETY_VARIABLES = [
@@ -15,6 +16,16 @@ _MARINE_SAFETY_VARIABLES = [
     "wave_height_m",
     "wave_period_s",
 ]
+
+_MARINE_FISHING_VARIABLES = [
+    "sst_c",
+    "wave_height_m",
+    "wave_period_s",
+    "chlorophyll_mg_m3",
+]
+
+
+_FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
 
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
@@ -44,6 +55,12 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
             ],
             "errors": ["Ocean agent could not access the OceanAI database."],
         }
+
+    query = state.get("query", "").lower()
+    is_fishing_query = any(term in query for term in _FISHING_TERMS)
+    requested_variables = (
+        _MARINE_FISHING_VARIABLES if is_fishing_query else _MARINE_SAFETY_VARIABLES
+    )
 
     updates: dict[str, Any] = {
         "agent_results": [],
@@ -83,7 +100,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
         "longitude": location["longitude"],
-        "variables": _MARINE_SAFETY_VARIABLES,
+        "variables": requested_variables,
         "radius_km": 50.0,
     }
 
@@ -105,6 +122,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         "status": marine_result.get("status", "unavailable"),
         "source": marine_data.get("source") if isinstance(marine_data, dict) else "marine provider",
         "dataset": marine_data.get("dataset") if isinstance(marine_data, dict) else "marine data",
+        "requested_variables": requested_variables,
         "missing_variables": marine_result.get("missing_variables", []),
         "provider_contributions": marine_result.get("provider_contributions", []),
         "errors": marine_result.get("errors", []),
@@ -116,6 +134,26 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
 
     if isinstance(marine_data, dict):
         updates["evidence"].append(marine_data)
+
+    # PFZ is a separate official advisory service. At this stage we verify
+    # availability and preserve the official reference without inventing
+    # location-specific PFZ coordinates.
+    if is_fishing_query:
+        pfz_tool = tool_registry.get("get_pfz_service_status")
+        pfz_result = pfz_tool()
+        updates["agent_results"].append(
+            {
+                "agent": "ocean",
+                "status": pfz_result.get("status", "unavailable"),
+                "source": pfz_result.get("source", "INCOIS"),
+                "dataset": pfz_result.get("dataset", "Potential Fishing Zone Advisory WebGIS"),
+                "pfz_service": pfz_result,
+            }
+        )
+        if pfz_result.get("status") == "success":
+            updates["evidence"].append(pfz_result)
+        for error in pfz_result.get("errors", []):
+            updates["errors"].append(f"PFZ: {error}")
 
     if marine_result.get("errors"):
         updates["errors"].extend(
