@@ -32,9 +32,9 @@ def _filter_forecast_days(
     if start is None or end is None:
         return forecast_days
 
-    # WeatherAPI's hourly timestamps are local wall-clock times without an
-    # explicit offset. The resolved ORCA window is also expressed in the
-    # target location's local timezone, so compare their wall-clock values.
+    # WeatherAPI hourly timestamps are local wall-clock times without an
+    # explicit offset. Compare them with the wall-clock component of the
+    # requested window so a +05:30 request is matched to Mumbai local hours.
     if start.tzinfo is not None:
         start = start.replace(tzinfo=None)
     if end.tzinfo is not None:
@@ -72,9 +72,8 @@ def get_weather_forecast(
 ) -> dict[str, Any]:
     """Fetch forecast weather and return normalized evidence for ORCA.
 
-    The provider fetches enough calendar days to cover the requested window,
-    then filters hourly evidence to that explicit local-time interval. When no
-    window is supplied, it retains the previous two-day behaviour.
+    For an explicit future window, fetch enough calendar days to include the
+    requested date, then filter the returned hourly values to that window.
     """
     if not settings.WEATHER_API_KEY:
         return {
@@ -93,7 +92,12 @@ def get_weather_forecast(
         }
 
     if start and end:
-        days = (end.date() - start.date()).days + 1
+        # WeatherAPI's `days` parameter counts from the current local day.
+        # Always request at least two days for a resolved future window so a
+        # `tomorrow ...` query includes tomorrow's forecast.
+        current_local_date = datetime.now(start.tzinfo).date() if start.tzinfo else datetime.now().date()
+        days = max(1, (end.date() - current_local_date).days + 1)
+        days = max(days, 2)
 
     if not 1 <= days <= 14:
         raise ValueError("days must be between 1 and 14")
