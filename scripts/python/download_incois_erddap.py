@@ -1,22 +1,10 @@
 """Download and transform public INCOIS ERDDAP datasets.
 
-This script uses INCOIS's public ERDDAP griddap service. It downloads a small
-spatial/time subset as NetCDF and can transform the downloaded file to CSV or
-Parquet for analytics/database ingestion.
+The script downloads small regional/time subsets as NetCDF and can transform
+those files into a normalized long-form CSV or Parquet table.
 
-Examples:
-  python scripts/python/download_incois_erddap.py --list
-  python scripts/python/download_incois_erddap.py --dataset sst --start 2026-01-01 --end 2026-01-03
-  python scripts/python/download_incois_erddap.py --dataset value_added --start 2026-01-01 --end 2026-01-03 --format parquet
-  python scripts/python/download_incois_erddap.py --dataset chlorophyll --start 2006-01-01 --end 2006-03-01 --format csv
-
-Important:
-  - Do not request the full archive in one call. Use small time/spatial chunks.
-  - Dataset availability and coordinates can change; the script validates the
-    downloaded NetCDF before conversion.
-  - PFZ advisories and the operational ROMS holdings are not assumed to be
-    downloadable through these ERDDAP datasets. Their access path must be
-    validated separately before automation.
+It deliberately does not claim that a dataset is available until the remote
+ERDDAP endpoint successfully returns data.
 """
 
 from __future__ import annotations
@@ -25,6 +13,7 @@ import argparse
 from pathlib import Path
 from urllib.parse import quote
 
+import pandas as pd
 import requests
 import xarray as xr
 
@@ -32,21 +21,12 @@ BASE_URL = "https://erddap.incois.gov.in/erddap/griddap"
 OUTPUT_DIR = Path("datasets/raw/incois")
 
 DATASETS = {
-    "sst": {
-        "dataset_id": "NOAA_AVHRR_AMSR_datasets",
-        "variables": ["sst"],
-        "notes": "INCOIS ERDDAP Daily-OI SST product",
-    },
+    "sst": {"dataset_id": "NOAA_AVHRR_AMSR_datasets", "variables": ["sst"]},
     "value_added": {
         "dataset_id": "incois_valueadded_products_datasets",
         "variables": ["MLD", "D20", "GEO_U", "GEO_V"],
-        "notes": "INCOIS value-added ocean products; includes MLD and geostrophic currents",
     },
-    "chlorophyll": {
-        "dataset_id": "IRS_chlorophyll_datasets",
-        "variables": ["CHLOROPHYLL"],
-        "notes": "IRS P4 OCM chlorophyll archive",
-    },
+    "chlorophyll": {"dataset_id": "IRS_chlorophyll_datasets", "variables": ["CHLOROPHYLL"]},
 }
 
 DEFAULT_BBOX = (50.0, 90.0, 0.0, 25.0)
@@ -54,7 +34,7 @@ DEFAULT_BBOX = (50.0, 90.0, 0.0, 25.0)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download a public INCOIS ERDDAP subset")
-    parser.add_argument("--dataset", choices=sorted(DATASETS), help="Configured INCOIS dataset")
+    parser.add_argument("--dataset", choices=sorted(DATASETS), help="Configured dataset alias")
     parser.add_argument("--list", action="store_true", help="List configured datasets")
     parser.add_argument("--start", help="Start time, e.g. 2026-01-01T00:00:00Z")
     parser.add_argument("--end", help="End time, e.g. 2026-01-03T00:00:00Z")
@@ -69,7 +49,6 @@ def parse_args() -> argparse.Namespace:
 
 def build_query(config: dict, start: str, end: str, args: argparse.Namespace) -> str:
     variables = ",".join(config["variables"])
-    # ERDDAP griddap accepts coordinate constraints directly in the query.
     return (
         f"{variables}"
         f"&time[({start}):1:({end})]"
@@ -88,28 +67,69 @@ def download(url: str, destination: Path) -> None:
                     handle.write(chunk)
 
 
-def validate_dataset(path: Path) -> xr.Dataset:
+def validate_dataset(path: Path, expected_variables: list[str]) -> xr.Dataset:
     ds = xr.open_dataset(path)
-    required = {"time", "latitude", "longitude"}
-    missing = required - set(ds.coords)
-    if missing:
+    required_coords = {"time", "latitude", "longitude"}
+    missing_coords = required_coords - set(ds.coords)
+    if missing_coords:
         ds.close()
-        raise ValueError(f"Missing required coordinates: {sorted(missing)}")
+        raise ValueError(f"Missing required coordinates: {sorted(missing_coords)}")
+
+    missing_variables = set(expected_variables) - set(ds.data_vars)
+    if missing_variables:
+        ds.close()
+        raise ValueError(f"Missing requested variables: {sorted(missing_variables)}")
+
     if not ds.data_vars:
         ds.close()
         raise ValueError("Downloaded dataset contains no data variables")
+
     print("Validated NetCDF:")
     print(f"  dimensions: {dict(ds.sizes)}")
     print(f"  variables : {list(ds.data_vars)}")
+    print(f"  time      : {ds.time.min().item()} -> {ds.time.max().item()}")
     return ds
 
 
-def flatten_to_table(ds: xr.Dataset):
+def flatten_to_ocean_table(ds: xr.Dataset, source: str, dataset_id: str) -> pd.DataFrame:
+    """Convert a gridded dataset to one database-friendly row per observation."""
     frame = ds.to_dataframe().reset_index()
-    # Keep a stable, database-friendly ordering.
-    preferred = ["time", "latitude", "longitude"]
-    remaining = [c for c in frame.columns if c not in preferred]
-    return frame[preferred + remaining]
+
+    value_columns = [c for c in frame.columns if c not in {"time", "latitude", "longitude"}]
+    rows: list[pd.DataFrame] = []
+
+    for variable in value_columns:
+        part = frame[["time", "latitude", "longitude", variable]].copy()
+        part = part.rename(columns={variable: "value"})
+        part["variable"] = variable
+        part["source"] = source
+        part["dataset"] = dataset_id
+        part["data_type"] = "observation"
+        part["quality_flag"] = "present"
+        part = part.dropna(subset=["value"])
+        rows.append(part)
+
+    if not rows:
+        raise ValueError("No non-null ocean observations found")
+
+    result = pd.concat(rows, ignore_index=True)
+    result["timestamp"] = pd.to_datetime(result.pop("time"), utc=True)
+    result["unit"] = result["variable"].map({"sst": "degC"}).fillna("")
+
+    return result[
+        [
+            "timestamp",
+            "latitude",
+            "longitude",
+            "variable",
+            "value",
+            "unit",
+            "source",
+            "dataset",
+            "data_type",
+            "quality_flag",
+        ]
+    ].sort_values(["timestamp", "variable", "latitude", "longitude"])
 
 
 def main() -> None:
@@ -118,7 +138,6 @@ def main() -> None:
     if args.list:
         for alias, config in DATASETS.items():
             print(f"{alias}: {config['dataset_id']} -> {', '.join(config['variables'])}")
-            print(f"  {config['notes']}")
         return
 
     if not args.dataset or not args.start or not args.end:
@@ -139,24 +158,23 @@ def main() -> None:
     print(f"  variables: {', '.join(config['variables'])}")
     print(f"  bbox    : {args.min_lon},{args.max_lon},{args.min_lat},{args.max_lat}")
     print(f"  time    : {args.start} -> {args.end}")
-    print(f"  output  : {nc_path}")
 
     download(url, nc_path)
-    ds = validate_dataset(nc_path)
+    ds = validate_dataset(nc_path, config["variables"])
 
     try:
         if args.format == "nc":
             print(f"Ready: {nc_path}")
             return
 
-        frame = flatten_to_table(ds)
+        table = flatten_to_ocean_table(ds, "INCOIS", config["dataset_id"])
+        out = args.output_dir / f"{stem}.{args.format}"
         if args.format == "csv":
-            out = args.output_dir / f"{stem}.csv"
-            frame.to_csv(out, index=False)
+            table.to_csv(out, index=False)
         else:
-            out = args.output_dir / f"{stem}.parquet"
-            frame.to_parquet(out, index=False)
+            table.to_parquet(out, index=False)
         print(f"Transformed: {out}")
+        print(f"Rows: {len(table)}")
     finally:
         ds.close()
 
