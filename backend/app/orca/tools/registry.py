@@ -6,7 +6,7 @@ from typing import Any
 from app.orca.tools.geo import reverse_geocode
 from app.orca.tools.marine import get_marine_conditions
 from app.orca.tools.ocean import get_ocean_conditions
-from app.orca.tools.pfz import get_pfz_service_status
+from app.orca.tools.pfz import get_pfz_advisory, get_pfz_service_status
 from app.orca.tools.weather import get_weather_forecast
 
 
@@ -38,5 +38,6 @@ tool_registry = ORCAToolRegistry()
 tool_registry.register("get_weather_forecast", get_weather_forecast)
 tool_registry.register("get_ocean_conditions", get_ocean_conditions)
 tool_registry.register("get_marine_conditions", get_marine_conditions)
+tool_registry.register("get_pfz_advisory", get_pfz_advisory)
 tool_registry.register("get_pfz_service_status", get_pfz_service_status)
 tool_registry.register("reverse_geocode", reverse_geocode)
