@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -87,7 +87,7 @@ def get_weather_forecast(
             }
         )
 
-    retrieved_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     evidence = {
         "source": "WeatherAPI",
