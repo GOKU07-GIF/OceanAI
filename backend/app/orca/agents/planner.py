@@ -3,15 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.orca.state import ORCAState
+from app.orca.time import resolve_requested_time
 
 
 def plan_query(state: ORCAState) -> dict[str, Any]:
-    """Create a deterministic task plan for the first ORCA slice.
-
-    The planner establishes the graph/state contract first. An LLM planner can
-    later replace the intent classification while preserving this output
-    structure.
-    """
+    """Create a deterministic task plan and resolve common time windows."""
     query = state.get("query", "").lower()
 
     tasks: list[dict[str, str]] = []
@@ -75,7 +71,13 @@ def plan_query(state: ORCAState) -> dict[str, Any]:
             "Default marine information lookup for an unspecified query.",
         )
 
-    return {
+    requested_time = resolve_requested_time(state.get("query", ""))
+
+    updates: dict[str, Any] = {
         "activity": activity,
         "plan": tasks,
     }
+    if requested_time:
+        updates["requested_time"] = requested_time
+
+    return updates
