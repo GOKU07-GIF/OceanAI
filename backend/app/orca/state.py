@@ -23,6 +23,8 @@ class ORCAState(TypedDict, total=False):
     evidence: Annotated[list[dict[str, Any]], operator.add]
     risk_assessment: dict[str, Any]
     recommendation: dict[str, Any]
+    assistant_response: str
+    response_source: str
     map_data: dict[str, Any]
     errors: Annotated[list[str], operator.add]
     db: Any
