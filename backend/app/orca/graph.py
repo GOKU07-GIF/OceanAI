@@ -7,43 +7,67 @@ from langgraph.graph import END, START, StateGraph
 from app.orca.agents.geo import run_geo_agent
 from app.orca.agents.ocean import run_ocean_agent
 from app.orca.agents.planner import plan_query
+from app.orca.agents.risk import run_risk_agent
 from app.orca.agents.weather import run_weather_agent
 from app.orca.state import ORCAState
 
 
-def route_after_planner(state: ORCAState) -> list[str] | str:
-    """Run every specialized agent selected by the planner."""
-    agents = {task.get("agent") for task in state.get("plan", [])}
-    selected = [
-        agent
-        for agent in ("weather", "ocean", "geo")
-        if agent in agents
-    ]
-    return selected if selected else "end"
+_SPECIALISTS = {
+    "weather": run_weather_agent,
+    "ocean": run_ocean_agent,
+    "geo": run_geo_agent,
+}
+
+
+def execute_selected_agents(state: ORCAState) -> dict[str, Any]:
+    """Execute only agents selected by the planner and merge their results.
+
+    We keep the first ORCA vertical slice deterministic and sequential. This
+    gives the risk stage a complete state barrier without racing or invoking
+    the risk calculation multiple times. The individual agents remain
+    isolated and can later be fanned out in parallel when their contracts
+    support it.
+    """
+    working_state: ORCAState = dict(state)
+    updates: dict[str, Any] = {
+        "agent_results": [],
+        "evidence": [],
+        "errors": [],
+    }
+
+    selected_agents = [task.get("agent") for task in state.get("plan", [])]
+
+    for agent_name in ("weather", "ocean", "geo"):
+        if agent_name not in selected_agents:
+            continue
+
+        agent_update = _SPECIALISTS[agent_name](working_state)
+
+        for key, value in agent_update.items():
+            if key in {"agent_results", "evidence", "errors"}:
+                current = working_state.get(key, [])
+                merged = list(current)
+                merged.extend(value or [])
+                working_state[key] = merged
+                updates[key] = merged
+            else:
+                working_state[key] = value
+                updates[key] = value
+
+    return updates
 
 
 def build_orca_graph():
-    """Build the executable ORCA graph slice with parallel specialist routing."""
+    """Build the first complete ORCA decision-support graph slice."""
     graph = StateGraph(ORCAState)
     graph.add_node("planner", plan_query)
-    graph.add_node("weather", run_weather_agent)
-    graph.add_node("ocean", run_ocean_agent)
-    graph.add_node("geo", run_geo_agent)
+    graph.add_node("specialists", execute_selected_agents)
+    graph.add_node("risk", run_risk_agent)
 
     graph.add_edge(START, "planner")
-    graph.add_conditional_edges(
-        "planner",
-        route_after_planner,
-        {
-            "weather": "weather",
-            "ocean": "ocean",
-            "geo": "geo",
-            "end": END,
-        },
-    )
-    graph.add_edge("weather", END)
-    graph.add_edge("ocean", END)
-    graph.add_edge("geo", END)
+    graph.add_edge("planner", "specialists")
+    graph.add_edge("specialists", "risk")
+    graph.add_edge("risk", END)
 
     return graph.compile()
 
