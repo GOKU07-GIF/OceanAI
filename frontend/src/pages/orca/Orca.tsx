@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useOrca } from "../../hooks/useOrca";
 import type { OrcaEvidence, OrcaResponse } from "../../types/orca";
+import OrcaLocationPicker from "../../components/orca/OrcaLocationPicker";
 
 interface ConditionCardProps {
   label: string;
@@ -71,21 +72,33 @@ function getEvidenceValue(evidence: OrcaEvidence[], names: string[]): string {
     const metric = item.metric?.toLowerCase();
     return metric ? names.some((name) => metric.includes(name)) : false;
   });
-
   if (!match || match.value == null) return "Unavailable";
   return formatValue(match.value);
 }
 
 export default function Orca(): React.JSX.Element {
   const [query, setQuery] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const orca = useOrca();
   const result = orca.data;
   const evidence = getEvidenceList(result);
 
+  const handleLocationSelect = (selectedLatitude: number, selectedLongitude: number): void => {
+    setLatitude(selectedLatitude);
+    setLongitude(selectedLongitude);
+  };
+
   const handleAsk = (): void => {
     const trimmed = query.trim();
     if (!trimmed || orca.isPending) return;
-    orca.mutate({ query: trimmed, language: "en" });
+    orca.mutate({
+      query: trimmed,
+      language: "en",
+      ...(latitude !== null && longitude !== null
+        ? { latitude, longitude }
+        : {}),
+    });
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -117,7 +130,11 @@ export default function Orca(): React.JSX.Element {
   const seaTemperature = getEvidenceValue(evidence, ["sea temperature", "sst", "temperature"]);
   const waveHeight = getEvidenceValue(evidence, ["wave height", "wave_height", "waves"]);
   const windSpeed = getEvidenceValue(evidence, ["wind speed", "wind_speed", "wind"]);
-  const location = getEvidenceValue(evidence, ["location", "latitude", "longitude"]);
+  const evidenceLocation = getEvidenceValue(evidence, ["location", "latitude", "longitude"]);
+  const selectedLocation =
+    latitude !== null && longitude !== null
+      ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+      : evidenceLocation;
 
   return (
     <div className="space-y-6">
@@ -154,22 +171,26 @@ export default function Orca(): React.JSX.Element {
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-400"><Bot size={22} /></div>
-          <div><h2 className="font-semibold text-white">ORCA Recommendation</h2><p className="text-xs text-slate-500">{orca.isPending ? "Analyzing your request" : result ? "Latest ORCA response" : "Waiting for your question"}</p></div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-white"><MapPin size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Select Ocean Location</h2></div>
+            <p className="mt-2 text-sm text-slate-400">Click anywhere on the map to send that latitude and longitude with your ORCA query.</p>
+          </div>
+          {latitude !== null && longitude !== null && (
+            <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">Selected: {latitude.toFixed(4)}, {longitude.toFixed(4)}</div>
+          )}
         </div>
+        <div className="mt-4">
+          <OrcaLocationPicker latitude={latitude} longitude={longitude} onSelect={handleLocationSelect} />
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
+        <div className="flex items-center gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-400"><Bot size={22} /></div><div><h2 className="font-semibold text-white">ORCA Recommendation</h2><p className="text-xs text-slate-500">{orca.isPending ? "Analyzing your request" : result ? "Latest ORCA response" : "Waiting for your question"}</p></div></div>
         <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900/60 p-6">
           {orca.isPending && <div className="flex flex-col items-center justify-center text-center"><Loader2 size={32} className="animate-spin text-cyan-400" /><p className="mt-3 text-slate-300">ORCA is analyzing ocean conditions...</p><p className="mt-1 text-xs text-slate-600">This may take a few moments.</p></div>}
           {orca.isError && !orca.isPending && <div className="text-center"><AlertTriangle size={32} className="mx-auto text-amber-400" /><p className="mt-3 text-slate-300">Unable to reach ORCA right now.</p><p className="mt-1 text-xs text-slate-500">{orca.error instanceof Error ? orca.error.message : "Please try again."}</p></div>}
-          {!orca.isPending && !orca.isError && result && hasStructuredRecommendation && <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {recommendationDecision && <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">{recommendationDecision.replaceAll("_", " ")}</span>}
-              {recommendationConfidence && <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">Confidence: {recommendationConfidence}</span>}
-              {recommendationRisk && <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">Risk: {recommendationRisk}</span>}
-            </div>
-            {recommendationText && <p className="text-sm leading-6 text-slate-200">{recommendationText}</p>}
-            {recommendationFactorList.length > 0 && <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Why ORCA reached this decision</p><ul className="mt-3 space-y-2 text-sm text-slate-300">{recommendationFactorList.map((factor, index) => <li key={`${factor}-${index}`} className="flex gap-2"><span className="text-cyan-400">•</span><span>{factor}</span></li>)}</ul></div>}
-          </div>}
+          {!orca.isPending && !orca.isError && result && hasStructuredRecommendation && <div className="space-y-4"><div className="flex flex-wrap items-center gap-2">{recommendationDecision && <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">{recommendationDecision.replaceAll("_", " ")}</span>}{recommendationConfidence && <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">Confidence: {recommendationConfidence}</span>}{recommendationRisk && <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300">Risk: {recommendationRisk}</span>}</div>{recommendationText && <p className="text-sm leading-6 text-slate-200">{recommendationText}</p>}{recommendationFactorList.length > 0 && <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Why ORCA reached this decision</p><ul className="mt-3 space-y-2 text-sm text-slate-300">{recommendationFactorList.map((factor, index) => <li key={`${factor}-${index}`} className="flex gap-2"><span className="text-cyan-400">•</span><span>{factor}</span></li>)}</ul></div>}</div>}
           {!orca.isPending && !orca.isError && result && !hasStructuredRecommendation && responseText && <div className="whitespace-pre-wrap text-sm leading-6 text-slate-200">{responseText}</div>}
           {!orca.isPending && !orca.isError && result && !hasStructuredRecommendation && !responseText && <div className="text-center"><Compass size={32} className="mx-auto text-slate-600" /><p className="mt-3 text-slate-400">ORCA returned data, but no displayable response text.</p></div>}
           {!orca.isPending && !orca.isError && !result && <div className="text-center"><Compass size={32} className="mx-auto text-slate-600" /><p className="mt-3 text-slate-400">Ask ORCA a question to generate an ocean intelligence recommendation.</p><p className="mt-1 text-xs text-slate-600">The backend response will appear here after you submit a query.</p></div>}
@@ -182,7 +203,7 @@ export default function Orca(): React.JSX.Element {
           <ConditionCard label="Sea Temperature" value={seaTemperature} unit="°C" icon={<Thermometer size={22} />} />
           <ConditionCard label="Wave Height" value={waveHeight} unit="m" icon={<Waves size={22} />} />
           <ConditionCard label="Wind Speed" value={windSpeed} unit="m/s" icon={<Wind size={22} />} />
-          <ConditionCard label="Location" value={location} icon={<MapPin size={22} />} />
+          <ConditionCard label="Location" value={selectedLocation} icon={<MapPin size={22} />} />
         </div>
         {evidence.length > 0 && <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-800 p-5"><h3 className="font-semibold text-white">Evidence Returned by ORCA</h3><div className="mt-4 space-y-3">{evidence.map((item, index) => <div key={`${item.metric ?? item.source ?? "evidence"}-${index}`} className="rounded-xl bg-slate-900/70 p-4"><div className="flex flex-wrap items-center gap-2 text-sm">{item.metric && <span className="font-medium text-cyan-300">{item.metric}</span>}{item.value != null && <span className="text-white">{formatValue(item.value)}</span>}{item.unit && <span className="text-slate-500">{item.unit}</span>}</div>{item.source && <p className="mt-1 text-xs text-slate-500">Source: {item.source}</p>}{item.timestamp && <p className="mt-1 text-xs text-slate-600">Time: {item.timestamp}</p>}</div>)}</div></div>}
       </section>
