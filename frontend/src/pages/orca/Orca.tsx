@@ -31,9 +31,7 @@ function ConditionCard({ label, value, unit, icon }: ConditionCardProps): React.
           <p className="text-sm text-slate-400">{label}</p>
           <p className="mt-2 text-2xl font-bold text-white">
             {value}
-            {unit && value !== "Unavailable" && (
-              <span className="ml-1 text-sm font-normal text-slate-400">{unit}</span>
-            )}
+            {unit && value !== "Unavailable" && <span className="ml-1 text-sm font-normal text-slate-400">{unit}</span>}
           </p>
         </div>
         <div className="rounded-xl bg-slate-700 p-3 text-cyan-400">{icon}</div>
@@ -53,8 +51,7 @@ function formatValue(value: unknown): string {
 }
 
 function getEvidenceList(response: OrcaResponse | undefined): OrcaEvidence[] {
-  if (!response || !Array.isArray(response.evidence)) return [];
-  return response.evidence;
+  return response?.evidence ?? [];
 }
 
 function getObjectValue(value: unknown, key: string): unknown {
@@ -65,6 +62,13 @@ function getObjectValue(value: unknown, key: string): unknown {
 function getStringValue(value: unknown, key: string): string | undefined {
   const item = getObjectValue(value, key);
   return typeof item === "string" ? item : undefined;
+}
+
+function collectStrings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (typeof value === "object" && value !== null) return Object.values(value).flatMap(collectStrings);
+  return [];
 }
 
 function getEvidenceValue(evidence: OrcaEvidence[], names: string[]): string {
@@ -95,9 +99,7 @@ export default function Orca(): React.JSX.Element {
     orca.mutate({
       query: trimmed,
       language: "en",
-      ...(latitude !== null && longitude !== null
-        ? { latitude, longitude }
-        : {}),
+      ...(latitude !== null && longitude !== null ? { latitude, longitude } : {}),
     });
   };
 
@@ -111,18 +113,14 @@ export default function Orca(): React.JSX.Element {
   const recommendationConfidence = getStringValue(recommendation, "confidence");
   const recommendationRisk = getStringValue(recommendation, "risk_level");
   const recommendationFactors = getObjectValue(recommendation, "factors");
-  const recommendationFactorList = Array.isArray(recommendationFactors)
-    ? recommendationFactors.filter((factor): factor is string => typeof factor === "string")
-    : [];
+  const recommendationFactorList = collectStrings(recommendationFactors);
 
-  const risk = result?.risk;
-  const riskObject = typeof risk === "object" && risk !== null ? risk : undefined;
-  const riskFactors = Array.isArray(riskObject?.factors) ? riskObject.factors : [];
+  const riskAssessment = result?.risk_assessment;
+  const riskLevel = getStringValue(riskAssessment, "level") ?? getStringValue(riskAssessment, "risk_level") ?? recommendationRisk;
+  const riskFactors = collectStrings(getObjectValue(riskAssessment, "factors"));
   const effectiveRiskFactors = riskFactors.length > 0 ? riskFactors : recommendationFactorList;
-  const effectiveRiskLevel =
-    riskObject && typeof riskObject.level === "string" ? riskObject.level : recommendationRisk;
 
-  const responseText = result?.response ?? result?.answer;
+  const responseText = result?.assistant_response;
   const hasStructuredRecommendation = Boolean(
     recommendationDecision || recommendationText || recommendationConfidence || recommendationRisk,
   );
@@ -132,9 +130,7 @@ export default function Orca(): React.JSX.Element {
   const windSpeed = getEvidenceValue(evidence, ["wind speed", "wind_speed", "wind"]);
   const evidenceLocation = getEvidenceValue(evidence, ["location", "latitude", "longitude"]);
   const selectedLocation =
-    latitude !== null && longitude !== null
-      ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
-      : evidenceLocation;
+    latitude !== null && longitude !== null ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : evidenceLocation;
 
   return (
     <div className="space-y-6">
@@ -142,15 +138,10 @@ export default function Orca(): React.JSX.Element {
         <div>
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-cyan-500/10 p-3 text-cyan-400"><Bot size={30} /></div>
-            <div>
-              <h1 className="text-3xl font-bold text-white">ORCA Assistant</h1>
-              <p className="mt-1 text-sm text-slate-400">Ocean Research & Catch Advisory</p>
-            </div>
+            <div><h1 className="text-3xl font-bold text-white">ORCA Assistant</h1><p className="mt-1 text-sm text-slate-400">Ocean Research & Catch Advisory</p></div>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-medium text-green-400 md:self-auto">
-          <span className="h-2 w-2 rounded-full bg-green-400" /> Ready
-        </div>
+        <div className="flex items-center gap-2 self-start rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-medium text-green-400 md:self-auto"><span className="h-2 w-2 rounded-full bg-green-400" /> Ready</div>
       </div>
 
       <section className="rounded-2xl border border-cyan-500/20 bg-slate-800 p-6 shadow-lg shadow-cyan-950/10">
@@ -158,31 +149,14 @@ export default function Orca(): React.JSX.Element {
         <p className="mt-2 text-sm text-slate-400">Ask about ocean conditions, fishing suitability, safety, or marine observations.</p>
         <div className="mt-5 flex flex-col gap-3 md:flex-row">
           <input type="text" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="e.g. Is it safe to go fishing near Mumbai tomorrow?" className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-400" />
-          <button type="button" onClick={handleAsk} disabled={!query.trim() || orca.isPending} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">
-            {orca.isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-            {orca.isPending ? "Thinking..." : "Ask ORCA"}
-          </button>
+          <button type="button" onClick={handleAsk} disabled={!query.trim() || orca.isPending} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">{orca.isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{orca.isPending ? "Thinking..." : "Ask ORCA"}</button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {["Fishing conditions near Mumbai", "Ocean safety tomorrow", "Best conditions for fishing"].map((question) => (
-            <button key={question} type="button" onClick={() => setQuery(question)} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300">{question}</button>
-          ))}
-        </div>
+        <div className="mt-4 flex flex-wrap gap-2">{["Fishing conditions near Mumbai", "Ocean safety tomorrow", "Best conditions for fishing"].map((question) => <button key={question} type="button" onClick={() => setQuery(question)} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 transition hover:border-cyan-500/50 hover:text-cyan-300">{question}</button>)}</div>
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-white"><MapPin size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Select Ocean Location</h2></div>
-            <p className="mt-2 text-sm text-slate-400">Click anywhere on the map to send that latitude and longitude with your ORCA query.</p>
-          </div>
-          {latitude !== null && longitude !== null && (
-            <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">Selected: {latitude.toFixed(4)}, {longitude.toFixed(4)}</div>
-          )}
-        </div>
-        <div className="mt-4">
-          <OrcaLocationPicker latitude={latitude} longitude={longitude} onSelect={handleLocationSelect} />
-        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2 text-white"><MapPin size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Select Ocean Location</h2></div><p className="mt-2 text-sm text-slate-400">Click anywhere on the map to send that latitude and longitude with your ORCA query.</p></div>{latitude !== null && longitude !== null && <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">Selected: {latitude.toFixed(4)}, {longitude.toFixed(4)}</div>}</div>
+        <div className="mt-4"><OrcaLocationPicker latitude={latitude} longitude={longitude} onSelect={handleLocationSelect} /></div>
       </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6">
@@ -199,18 +173,13 @@ export default function Orca(): React.JSX.Element {
 
       <section>
         <div className="mb-4"><h2 className="text-xl font-semibold text-white">Environment Snapshot</h2><p className="mt-1 text-sm text-slate-400">Only verified environmental evidence returned by ORCA is shown here.</p></div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <ConditionCard label="Sea Temperature" value={seaTemperature} unit="°C" icon={<Thermometer size={22} />} />
-          <ConditionCard label="Wave Height" value={waveHeight} unit="m" icon={<Waves size={22} />} />
-          <ConditionCard label="Wind Speed" value={windSpeed} unit="m/s" icon={<Wind size={22} />} />
-          <ConditionCard label="Location" value={selectedLocation} icon={<MapPin size={22} />} />
-        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"><ConditionCard label="Sea Temperature" value={seaTemperature} unit="°C" icon={<Thermometer size={22} />} /><ConditionCard label="Wave Height" value={waveHeight} unit="m" icon={<Waves size={22} />} /><ConditionCard label="Wind Speed" value={windSpeed} unit="m/s" icon={<Wind size={22} />} /><ConditionCard label="Location" value={selectedLocation} icon={<MapPin size={22} />} /></div>
         {evidence.length > 0 && <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-800 p-5"><h3 className="font-semibold text-white">Evidence Returned by ORCA</h3><div className="mt-4 space-y-3">{evidence.map((item, index) => <div key={`${item.metric ?? item.source ?? "evidence"}-${index}`} className="rounded-xl bg-slate-900/70 p-4"><div className="flex flex-wrap items-center gap-2 text-sm">{item.metric && <span className="font-medium text-cyan-300">{item.metric}</span>}{item.value != null && <span className="text-white">{formatValue(item.value)}</span>}{item.unit && <span className="text-slate-500">{item.unit}</span>}</div>{item.source && <p className="mt-1 text-xs text-slate-500">Source: {item.source}</p>}{item.timestamp && <p className="mt-1 text-xs text-slate-600">Time: {item.timestamp}</p>}</div>)}</div></div>}
       </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-green-500/20 bg-green-950/10 p-6"><div className="flex items-center gap-3"><CheckCircle2 className="text-green-400" size={24} /><h2 className="text-xl font-semibold text-white">Fishing Suitability</h2></div><p className="mt-4 text-slate-400">ORCA combines available environmental indicators to support the fishing recommendation.</p><div className="mt-5 rounded-xl bg-slate-900/70 p-4 text-sm text-slate-300">{recommendationText ? recommendationText : recommendation ? formatValue(recommendation) : "Recommendation will appear after ORCA receives a query."}</div></section>
-        <section className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-6"><div className="flex items-center gap-3"><AlertTriangle className="text-amber-400" size={24} /><h2 className="text-xl font-semibold text-white">Risk Factors</h2></div><div className="mt-4 space-y-3 text-sm text-slate-400">{effectiveRiskFactors.length > 0 ? effectiveRiskFactors.map((factor, index) => <div key={`${factor}-${index}`} className="rounded-lg bg-slate-900/60 p-3">{factor}</div>) : effectiveRiskLevel ? <div className="rounded-lg bg-slate-900/60 p-3">Risk level: <span className="font-semibold text-white">{effectiveRiskLevel}</span></div> : result?.risk ? <div className="whitespace-pre-wrap rounded-lg bg-slate-900/60 p-3">{formatValue(risk)}</div> : <div className="rounded-lg bg-slate-900/60 p-3">No live risk assessment yet.</div>}</div></section>
+        <section className="rounded-2xl border border-green-500/20 bg-green-950/10 p-6"><div className="flex items-center gap-3"><CheckCircle2 className="text-green-400" size={24} /><h2 className="text-xl font-semibold text-white">Fishing Suitability</h2></div><p className="mt-4 text-slate-400">ORCA combines available environmental indicators to support the fishing recommendation.</p><div className="mt-5 rounded-xl bg-slate-900/70 p-4 text-sm text-slate-300">{recommendationText ?? "Recommendation will appear after ORCA receives a query."}</div></section>
+        <section className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-6"><div className="flex items-center gap-3"><AlertTriangle className="text-amber-400" size={24} /><h2 className="text-xl font-semibold text-white">Risk Factors</h2></div><div className="mt-4 space-y-3 text-sm text-slate-400">{effectiveRiskFactors.length > 0 ? effectiveRiskFactors.map((factor, index) => <div key={`${factor}-${index}`} className="rounded-lg bg-slate-900/60 p-3">{factor}</div>) : riskLevel ? <div className="rounded-lg bg-slate-900/60 p-3">Risk level: <span className="font-semibold text-white">{riskLevel}</span></div> : <div className="rounded-lg bg-slate-900/60 p-3">No live risk assessment yet.</div>}</div></section>
       </div>
     </div>
   );
