@@ -1,10 +1,10 @@
-﻿annotated-doc==0.0.4
+annotated-doc==0.0.4
 annotated-types==0.8.0
 anyio==4.14.2
 bcrypt==4.0.1
 certifi==2026.7.22
 cffi==2.1.0
-charset-normalizer==3.4.9
+charset-normalizer==4.0.0
 click==8.4.2
 colorama==0.4.6
 cryptography==49.0.0
@@ -19,6 +19,7 @@ joblib==1.5.3
 langgraph==1.2.11
 narwhals==2.24.0
 numpy==2.5.1
+openai==3.7.0
 pandas==3.0.5
 passlib==1.7.4
 pillow==12.3.0
