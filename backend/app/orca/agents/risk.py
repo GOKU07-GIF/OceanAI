@@ -94,10 +94,11 @@ def _extract_marine_forecast(agent_results: list[dict[str, Any]]) -> dict[str, A
 
 
 def run_risk_agent(state: ORCAState) -> dict[str, Any]:
-    """Assess marine risk using explicit prototype rules over collected evidence.
+    """Assess marine risk using explicit prototype rules over the selected window.
 
-    This remains deterministic. Missing or unavailable safety dimensions are
-    reported rather than interpreted as safe.
+    This remains a prototype scoring model, not an operational maritime safety
+    standard. Missing or unavailable dimensions are reported rather than
+    interpreted as safe.
     """
     agent_results = state.get("agent_results", [])
 
@@ -126,21 +127,21 @@ def run_risk_agent(state: ORCAState) -> dict[str, Any]:
         if weather["max_wind_kph"] is not None:
             if weather["max_wind_kph"] >= 45:
                 score += 3
-                factors.append("Forecast wind reaches at least 45 km/h.")
+                factors.append("Selected-window forecast wind reaches at least 45 km/h.")
             elif weather["max_wind_kph"] >= 30:
                 score += 2
-                factors.append("Forecast wind reaches at least 30 km/h.")
+                factors.append("Selected-window forecast wind reaches at least 30 km/h.")
             elif weather["max_wind_kph"] >= 20:
                 score += 1
-                factors.append("Forecast wind reaches at least 20 km/h.")
+                factors.append("Selected-window forecast wind reaches at least 20 km/h.")
 
         if weather["max_gust_kph"] is not None and weather["max_gust_kph"] >= 60:
             score += 2
-            factors.append("Forecast gusts reach at least 60 km/h.")
+            factors.append("Selected-window forecast gusts reach at least 60 km/h.")
 
         if weather["max_rain_probability"] is not None and weather["max_rain_probability"] >= 70:
             score += 1
-            factors.append("Forecast rain probability reaches at least 70%.")
+            factors.append("Selected-window forecast rain probability reaches at least 70%.")
     else:
         limitations.append("Weather forecast evidence is unavailable.")
 
@@ -180,8 +181,9 @@ def run_risk_agent(state: ORCAState) -> dict[str, Any]:
 
     if marine_forecast["min_wave_period_s"] is not None:
         dimensions_available += 1
+    else:
+        limitations.append("Wave period is not available for sea-state context.")
 
-    # Still not covered by the current first marine adapter.
     limitations.extend([
         "Maritime restriction/geofence data is not yet part of this risk calculation.",
         "Vessel-specific limits are not yet part of this risk calculation.",
@@ -207,9 +209,10 @@ def run_risk_agent(state: ORCAState) -> dict[str, Any]:
         "overall_risk": level,
         "score": score,
         "confidence": confidence,
+        "requested_window": state.get("requested_time"),
         "factors": factors,
         "limitations": limitations,
-        "method": "Deterministic prototype rules; missing safety dimensions are reported, not assumed safe.",
+        "method": "Deterministic prototype rules over the selected evidence window; missing safety dimensions are reported, not assumed safe.",
     }
 
     return {"risk_assessment": assessment}
