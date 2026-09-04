@@ -5,20 +5,33 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from app.orca.agents.planner import plan_query
+from app.orca.agents.weather import run_weather_agent
 from app.orca.state import ORCAState
 
 
-def build_orca_graph():
-    """Build the first ORCA graph slice.
+def route_after_planner(state: ORCAState) -> str:
+    """Run only the specialized agents selected by the planner."""
+    agents = {task.get("agent") for task in state.get("plan", [])}
+    return "weather" if "weather" in agents else "end"
 
-    The graph intentionally contains only the planner node at this stage.
-    Specialized agents and verified data tools will be added behind the same
-    state contract after their source/access contracts are finalized.
-    """
+
+def build_orca_graph():
+    """Build the first executable ORCA graph slice."""
     graph = StateGraph(ORCAState)
     graph.add_node("planner", plan_query)
+    graph.add_node("weather", run_weather_agent)
+
     graph.add_edge(START, "planner")
-    graph.add_edge("planner", END)
+    graph.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {
+            "weather": "weather",
+            "end": END,
+        },
+    )
+    graph.add_edge("weather", END)
+
     return graph.compile()
 
 
