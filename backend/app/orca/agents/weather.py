@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.orca.state import ORCAState
-from app.orca.tools.weather import get_weather_forecast
+from app.orca.tools.registry import tool_registry
 
 
 def run_weather_agent(state: ORCAState) -> dict[str, Any]:
@@ -21,6 +21,7 @@ def run_weather_agent(state: ORCAState) -> dict[str, Any]:
             "errors": ["Weather agent could not run because location is missing."],
         }
 
+    get_weather_forecast = tool_registry.get("get_weather_forecast")
     result = get_weather_forecast(
         latitude=location["latitude"],
         longitude=location["longitude"],
