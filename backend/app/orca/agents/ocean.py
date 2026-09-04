@@ -4,12 +4,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.orca.marine.models import MarineDataRequest
+from app.orca.marine.provider import marine_provider
 from app.orca.state import ORCAState
 from app.orca.tools.ocean import get_ocean_conditions
 
 
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
-    """Retrieve nearby OceanAI observations when the planner requests ocean data."""
+    """Collect local observations plus verified marine-source context."""
     location = state.get("location")
     db = state.get("db")
     if not location:
@@ -36,36 +38,77 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
             "errors": ["Ocean agent could not access the OceanAI database."],
         }
 
-    result = get_ocean_conditions(
+    updates: dict[str, Any] = {
+        "agent_results": [],
+        "evidence": [],
+        "errors": [],
+    }
+
+    local_result = get_ocean_conditions(
         db=db,
         latitude=location["latitude"],
         longitude=location["longitude"],
         owner_id=state["user_id"],
     )
 
-    agent_result = {
+    local_agent_result = {
         "agent": "ocean",
-        "status": result.get("status", "error"),
-        "source": result.get("source", "OceanAI PostgreSQL"),
-        "dataset": result.get("dataset", "OceanData"),
-        "observation_count": result.get("observation_count", 0),
-        "observations": result.get("observations", []),
+        "status": local_result.get("status", "error"),
+        "source": local_result.get("source", "OceanAI PostgreSQL"),
+        "dataset": local_result.get("dataset", "OceanData"),
+        "observation_count": local_result.get("observation_count", 0),
+        "observations": local_result.get("observations", []),
     }
+    updates["agent_results"].append(local_agent_result)
 
-    updates: dict[str, Any] = {
-        "agent_results": [agent_result],
-    }
-
-    if result.get("status") == "success":
-        updates["evidence"] = [
+    if local_result.get("status") == "success":
+        updates["evidence"].append(
             {
-                "source": result.get("source"),
-                "dataset": result.get("dataset"),
-                "type": result.get("type"),
-                "location": result.get("location"),
-                "radius_km": result.get("radius_km"),
-                "observations": result.get("observations", []),
+                "source": local_result.get("source"),
+                "dataset": local_result.get("dataset"),
+                "type": local_result.get("type"),
+                "location": local_result.get("location"),
+                "radius_km": local_result.get("radius_km"),
+                "observations": local_result.get("observations", []),
             }
-        ]
+        )
+
+    marine_request: MarineDataRequest = {
+        "latitude": location["latitude"],
+        "longitude": location["longitude"],
+        "variables": ["sst_c"],
+        "radius_km": 50.0,
+    }
+
+    marine_result = marine_provider.fetch(
+        request=marine_request,
+        provider_order=("incois", "copernicus", "mosdac"),
+    )
+
+    marine_data = marine_result.get("data")
+    marine_agent_result: dict[str, Any] = {
+        "agent": "ocean",
+        "status": marine_result.get("status", "unavailable"),
+        "source": marine_data.get("source") if isinstance(marine_data, dict) else "INCOIS",
+        "dataset": marine_data.get("dataset") if isinstance(marine_data, dict) else "INCOIS marine data",
+        "missing_variables": marine_result.get("missing_variables", []),
+        "errors": marine_result.get("errors", []),
+    }
+    if isinstance(marine_data, dict):
+        marine_agent_result["conditions"] = marine_data
+
+    updates["agent_results"].append(marine_agent_result)
+
+    if isinstance(marine_data, dict):
+        updates["evidence"].append(marine_data)
+
+    if marine_result.get("errors"):
+        updates["errors"].extend(
+            [
+                f"{item.get('source', 'marine')}: {item.get('error', 'provider error')}"
+                for item in marine_result["errors"]
+                if isinstance(item, dict)
+            ]
+        )
 
     return updates
