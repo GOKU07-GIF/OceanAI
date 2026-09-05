@@ -28,11 +28,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas pyarrow requests xarray netCDF4
 
+      - name: Verify INCOIS ERDDAP endpoints
+        run: |
+          python scripts/python/verify_incois_sources.py
+        continue-on-error: true
+
       - name: Acquire INCOIS core smoke batch
         run: |
           python scripts/python/acquire_incois_core.py --continue-on-error
 
-      - name: Upload acquired data artifact
+      - name: Upload acquisition artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
