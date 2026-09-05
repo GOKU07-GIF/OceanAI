@@ -28,6 +28,23 @@ dist/
 
 
 # ============================================================
+# DATASETS / LOCAL DATA
+# ============================================================
+
+# Real ocean downloads are large and must not be committed to Git.
+datasets/raw/**/*.nc
+datasets/raw/**/*.nc4
+datasets/raw/**/*.h5
+datasets/raw/**/*.hdf
+datasets/raw/**/*.grib
+datasets/raw/**/*.grb
+datasets/raw/**/*.csv
+datasets/raw/**/*.parquet
+datasets/processed/**/*.csv
+datasets/processed/**/*.parquet
+
+
+# ============================================================
 # LOGS
 # ============================================================
 
