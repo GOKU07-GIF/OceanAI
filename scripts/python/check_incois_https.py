@@ -13,10 +13,14 @@ import sys
 
 try:
     import truststore
-except ImportError:
+except Exception as exc:
     raise SystemExit(
-        "truststore is not installed. Run: python -m pip install truststore"
-    )
+        "Could not import truststore.\n"
+        f"Python executable: {sys.executable}\n"
+        f"Python version: {sys.version}\n"
+        f"Import error: {type(exc).__name__}: {exc}\n"
+        "Run: python -m pip install --force-reinstall truststore==0.10.4"
+    ) from exc
 
 truststore.inject_into_ssl()
 
@@ -27,6 +31,8 @@ URL = "https://erddap.incois.gov.in/erddap/info/NOAA_AVHRR_AMSR_datasets/index.h
 
 def main() -> None:
     print(f"Python: {sys.version}")
+    print(f"Executable: {sys.executable}")
+    print(f"truststore: {getattr(truststore, '__version__', 'installed')}")
     print(f"Testing: {URL}")
     try:
         response = requests.get(URL, timeout=30)
