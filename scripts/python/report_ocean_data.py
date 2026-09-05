@@ -46,9 +46,13 @@ CANONICAL_VARIABLES = (
     "wave_direction_deg",
     "wind_speed_m_s",
     "chlorophyll_mg_m3",
+    "diffuse_attenuation_m_inv",
+    "total_suspended_matter_mg_l",
     "salinity_psu",
     "mld_m",
+    "ild_m",
     "d20_m",
+    "d26_m",
     "current_u_cm_s",
     "current_v_cm_s",
 )
