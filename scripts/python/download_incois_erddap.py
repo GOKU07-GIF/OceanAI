@@ -4,7 +4,8 @@ The script downloads small regional/time subsets as NetCDF and can transform
 those files into a normalized long-form CSV or Parquet table.
 
 Configured public gridded sources include INCOIS SST, value-added ocean
-products (MLD/D20/GEO_U/GEO_V), OCM chlorophyll, and QuickSCAT wind fields.
+products, OCM chlorophyll, QuickSCAT wind fields, and monthly ARGO VAM
+temperature/salinity profiles.
 """
 
 from __future__ import annotations
@@ -59,6 +60,14 @@ DATASETS = {
         },
         "data_type": "observation",
     },
+    "argo_vam": {
+        "dataset_id": "incois_argo_mnt_VAM",
+        "variables": ["TEMP", "SAL"],
+        "dimensions": ["time", "ZAX", "latitude", "longitude"],
+        "range": {"ZAX": (5.0, 2000.0)},
+        "units": {"TEMP": "degC", "SAL": "PSU"},
+        "data_type": "historical_profile",
+    },
 }
 
 DEFAULT_BBOX = (50.0, 90.0, 0.0, 25.0)
@@ -87,9 +96,13 @@ def constraint(dimension: str, start: str, end: str, args: argparse.Namespace, c
     if dimension == "longitude":
         return f"longitude[({args.min_lon}):1:({args.max_lon})]"
     fixed_value = config.get("fixed", {}).get(dimension)
-    if fixed_value is None:
-        raise ValueError(f"No constraint configured for required dimension: {dimension}")
-    return f"{dimension}[({fixed_value}):1:({fixed_value})]"
+    if fixed_value is not None:
+        return f"{dimension}[({fixed_value}):1:({fixed_value})]"
+    range_value = config.get("range", {}).get(dimension)
+    if range_value is not None:
+        minimum, maximum = range_value
+        return f"{dimension}[({minimum}):1:({maximum})]"
+    raise ValueError(f"No constraint configured for required dimension: {dimension}")
 
 
 def build_query(config: dict, start: str, end: str, args: argparse.Namespace) -> str:
@@ -140,7 +153,7 @@ def flatten_to_ocean_table(
     data_type: str,
 ) -> pd.DataFrame:
     frame = ds.to_dataframe().reset_index()
-    value_columns = [c for c in frame.columns if c not in {"time", "latitude", "longitude", "zlev"}]
+    value_columns = [c for c in frame.columns if c not in {"time", "latitude", "longitude", "zlev", "ZAX"}]
     rows: list[pd.DataFrame] = []
 
     for variable in value_columns:
