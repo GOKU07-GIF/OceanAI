@@ -31,13 +31,24 @@ jobs:
           python scripts/python/download_copernicus_subset.py --dataset waves --dry-run
           python scripts/python/download_copernicus_subset.py --dataset physics --dry-run
 
+      - name: Calculate rolling forecast window
+        id: window
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime, timedelta, timezone
+          start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+          end = start + timedelta(days=1)
+          print(f"start={start:%Y-%m-%dT%H:%M:%S}")
+          print(f"end={end:%Y-%m-%dT%H:%M:%S}")
+          PY
+
       - name: Acquire small Copernicus wave subset
         if: ${{ env.COPERNICUSMARINE_SERVICE_USERNAME != '' && env.COPERNICUSMARINE_SERVICE_PASSWORD != '' }}
         run: |
           python scripts/python/download_copernicus_subset.py \
             --dataset waves \
-            --start 2026-09-05T00:00:00 \
-            --end 2026-09-06T00:00:00 \
+            --start "${{ steps.window.outputs.start }}" \
+            --end "${{ steps.window.outputs.end }}" \
             --min-lon 68 --max-lon 78 \
             --min-lat 8 --max-lat 24 \
             --output-dir datasets/raw/copernicus
