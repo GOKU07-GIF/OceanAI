@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS ocean_observations (
     timestamp TIMESTAMPTZ NOT NULL,
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
+    depth_m DOUBLE PRECISION,
     variable VARCHAR(64) NOT NULL,
     value DOUBLE PRECISION NOT NULL,
     unit VARCHAR(32),
@@ -14,7 +15,7 @@ CREATE TABLE IF NOT EXISTS ocean_observations (
     data_type VARCHAR(32) NOT NULL,
     quality_flag VARCHAR(32) NOT NULL DEFAULT 'present',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (timestamp, latitude, longitude, variable, source, dataset)
+    UNIQUE (timestamp, latitude, longitude, depth_m, variable, source, dataset)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ocean_observations_time
@@ -25,3 +26,6 @@ CREATE INDEX IF NOT EXISTS idx_ocean_observations_location
 
 CREATE INDEX IF NOT EXISTS idx_ocean_observations_variable_time
     ON ocean_observations (variable, timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_ocean_observations_depth
+    ON ocean_observations (depth_m);
