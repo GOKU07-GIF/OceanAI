@@ -1,0 +1,52 @@
+name: Copernicus data smoke acquisition
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 2"
+
+jobs:
+  copernicus-smoke:
+    runs-on: ubuntu-latest
+    env:
+      COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUSMARINE_SERVICE_USERNAME }}
+      COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUSMARINE_SERVICE_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Copernicus tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install copernicusmarine pandas pyarrow xarray netCDF4
+
+      - name: Validate request builder
+        run: |
+          python scripts/python/download_copernicus_subset.py --dataset waves --dry-run
+          python scripts/python/download_copernicus_subset.py --dataset physics --dry-run
+
+      - name: Acquire small Copernicus wave subset
+        if: ${{ env.COPERNICUSMARINE_SERVICE_USERNAME != '' && env.COPERNICUSMARINE_SERVICE_PASSWORD != '' }}
+        run: |
+          python scripts/python/download_copernicus_subset.py \
+            --dataset waves \
+            --start 2026-09-05T00:00:00 \
+            --end 2026-09-06T00:00:00 \
+            --min-lon 68 --max-lon 78 \
+            --min-lat 8 --max-lat 24 \
+            --output-dir datasets/raw/copernicus
+
+      - name: Upload Copernicus artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: copernicus-smoke-data
+          path: datasets/raw/copernicus/
+          if-no-files-found: warn
+          retention-days: 7
