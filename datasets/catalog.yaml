@@ -1,4 +1,4 @@
-version: 1
+version: 2
 project_region:
   name: Indian Ocean and Indian coastal waters
   bbox:
@@ -10,7 +10,7 @@ project_region:
 
 status_definitions:
   planned: "Dataset selected but no download has been performed."
-  ready: "Source and retrieval method are documented; credentials/access may still be required."
+  ready: "Public source and retrieval method are documented; access should be tested before bulk ingestion."
   downloaded: "A real local download has been completed and validated."
   validated: "Downloaded data passed metadata/value/time/coordinate checks."
 
@@ -20,109 +20,137 @@ priority:
   P2: "Historical/context or future enhancement"
 
 datasets:
-  - id: copernicus_sst_nrt
+  - id: incois_sst_daily_oi
     priority: P0
-    source: Copernicus Marine
-    product: "Global Ocean - Sea Surface Temperature L4"
-    dataset_id: "cmems_obs-sst_glo_phy-temp_nrt_P1D-m"
-    variables: [analysed_sst]
-    data_kind: observation
+    source: INCOIS ERDDAP
+    product: "Daily-OI-V2, final, Data"
+    dataset_id: "NOAA_AVHRR_AMSR_datasets"
+    variables: [sst, anom]
+    data_kind: historical_observation
     frequency: daily
     format: NetCDF
-    purpose: "Current SST and SST evidence"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
+    purpose: "Historical SST and SST-anomaly features"
+    coverage: "2002-06-01 through 2011-10-04"
+    status: ready
+    access: "Public griddap subset"
 
-  - id: copernicus_physics_forecast
+  - id: incois_value_added
     priority: P0
-    source: Copernicus Marine
-    product: "Global Ocean Physics Analysis and Forecast"
-    dataset_id: "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
-    variables: [thetao, so, uo, vo, zos]
-    data_kind: forecast
+    source: INCOIS ERDDAP
+    product: "INCOIS Value Added Products"
+    dataset_id: "incois_valueadded_products_datasets"
+    variables: [MLD, ILD, D26, D20, HTCNT, DYN_HT, GEO_U, GEO_V]
+    data_kind: historical_ocean_products
+    frequency: irregular
+    format: NetCDF
+    purpose: "Mixed-layer, thermocline, heat-content and geostrophic-current context"
+    coverage: "2004-01-10 through 2019-03-30"
+    status: ready
+    access: "Public griddap subset"
+
+  - id: incois_quickscat_daily
+    priority: P0
+    source: INCOIS ERDDAP
+    product: "INCOIS QuickSCAT Daily Data"
+    dataset_id: "incois_quickscat_daily_datasets"
+    variables: [WIND_SPEED, ZONAL_WIND_SPEED, MERI_WIND_SPEED, WIND_STRESS]
+    data_kind: historical_observation
     frequency: daily
     format: NetCDF
-    purpose: "Forecast temperature, salinity, currents and sea level"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
+    purpose: "Historical surface wind and wind-stress features"
+    status: ready
+    access: "Public griddap subset"
 
-  - id: copernicus_physics_reanalysis
-    priority: P2
-    source: Copernicus Marine
-    product: "Global Ocean Physics Reanalysis"
-    dataset_id: "cmems_mod_glo_phy_my_0.083deg_P1D-m"
-    variables: [thetao, so, uo, vo, zos]
-    data_kind: historical_reanalysis
-    frequency: daily
-    format: NetCDF
-    purpose: "Historical ocean context and model training features"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
-
-  - id: copernicus_waves_forecast
-    priority: P0
-    source: Copernicus Marine
-    product: "Global Ocean Waves Analysis and Forecast"
-    dataset_id: "cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
-    variables: [VHM0, VTM02, VMDR]
-    data_kind: forecast
-    frequency: 3-hourly
-    format: NetCDF
-    purpose: "Significant wave height and wave-period/direction evidence"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
-
-  - id: copernicus_bgc_forecast
+  - id: incois_oceansat2_ocm
     priority: P1
-    source: Copernicus Marine
-    product: "Global Ocean Biogeochemistry Analysis and Forecast"
-    dataset_id: "cmems_mod_glo_bgc_anfc_0.25deg_P1D-m"
-    variables: [chl]
-    data_kind: forecast
+    source: INCOIS ERDDAP
+    product: "INCOIS Oceansat 2 OCM Data"
+    dataset_id: "incois_oceansat2_datasets"
+    variables: [CHL, KD490, TSM]
+    data_kind: historical_observation
     frequency: daily
     format: NetCDF
-    purpose: "Chlorophyll-a / productivity context"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
+    purpose: "Chlorophyll/productivity, water clarity and suspended-matter context"
+    status: ready
+    access: "Public griddap subset"
 
-  - id: copernicus_bgc_hindcast
-    priority: P2
-    source: Copernicus Marine
-    product: "Global Ocean Biogeochemistry Hindcast"
-    dataset_id: "cmems_mod_glo_bgc_my_0.25deg_P1D-m"
-    variables: [chl]
-    data_kind: historical_reanalysis
-    frequency: daily
+  - id: incois_irs_chlorophyll
+    priority: P1
+    source: INCOIS ERDDAP
+    product: "IRS P4 OCM-Chlorophyll"
+    dataset_id: "IRS_chlorophyll_datasets"
+    variables: [CHLOROPHYLL]
+    data_kind: historical_observation
+    frequency: provider_defined
     format: NetCDF
-    purpose: "Historical chlorophyll/productivity features"
-    status: planned
-    access: "Copernicus Marine Toolbox subset; account credentials required"
+    purpose: "Historical chlorophyll archive"
+    status: ready
+    access: "Public griddap subset"
+
+  - id: incois_argo_monthly_vam
+    priority: P1
+    source: INCOIS ERDDAP
+    product: "INCOIS ARGO Monthly VAM"
+    dataset_id: "incois_argo_mnt_VAM"
+    variables: [TEMP, SAL, TERR, SERR]
+    data_kind: historical_profile
+    frequency: monthly
+    format: NetCDF
+    purpose: "Temperature/salinity profile features and validation"
+    status: ready
+    access: "Public griddap subset"
+
+  - id: incois_argo_monthly_mccreary
+    priority: P2
+    source: INCOIS ERDDAP
+    product: "INCOIS ARGO Monthly McCreary"
+    dataset_id: "incois_argo_mnt_McCreary"
+    variables: [provider_defined]
+    data_kind: historical_profile
+    frequency: monthly
+    format: NetCDF
+    purpose: "Independent ARGO-derived historical context"
+    status: ready
+    access: "Public griddap subset"
+
+  - id: incois_argo_floats
+    priority: P1
+    source: INCOIS ERDDAP
+    product: "INDIAN ARGO Floats Data"
+    dataset_id: "Indian_ARGO_Floats"
+    variables: [provider_defined]
+    data_kind: profile_observation
+    frequency: provider_defined
+    format: tabular/NetCDF
+    purpose: "In-situ profile observations for validation and model features"
+    status: ready
+    access: "Public tabledap dataset"
 
   - id: incois_pfzs
-    priority: P1
+    priority: P0
     source: INCOIS
     product: "Potential Fishing Zone Advisories"
     dataset_id: null
     variables: [pfz_advisory, landing_centres, sectors]
     data_kind: advisory
     frequency: near_real_time
-    format: ASCII/JPEG
+    format: ASCII/JPEG/WebGIS
     purpose: "Fishing-specific advisory evidence"
     status: planned
-    access: "INCOIS PFZ geoportal/data services; retrieval method to be validated before automation"
+    access: "INCOIS PFZ services; retrieval method must be validated separately"
 
   - id: incois_roms
-    priority: P1
+    priority: P0
     source: INCOIS
-    product: "ROMS ocean model holdings"
+    product: "ROMS operational model holdings"
     dataset_id: null
     variables: [sst, mld, d20, currents]
-    data_kind: near_real_time
+    data_kind: forecast_or_near_real_time
     frequency: near_real_time
     format: provider_defined
-    purpose: "Indian-region model cross-check and local evidence"
+    purpose: "Local Indian-region model cross-check"
     status: planned
-    access: "INCOIS data services; retrieval/download path to be validated"
+    access: "INCOIS data services; direct download path must be validated separately"
 
   - id: incois_boundaries
     priority: P1
@@ -149,6 +177,58 @@ datasets:
     purpose: "Baseline/anomaly context"
     status: planned
     access: "INCOIS data holdings"
+
+  - id: copernicus_sst_nrt
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean Sea Surface Temperature L4"
+    dataset_id: "cmems_obs-sst_glo_phy-sst_nrt_0.05deg_P1D-M"
+    variables: [analysed_sst]
+    data_kind: observation
+    frequency: daily
+    format: NetCDF
+    purpose: "Current SST and forecast-adjacent evidence"
+    status: planned
+    access: "Copernicus Marine subset; account credentials required"
+
+  - id: copernicus_physics_forecast
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean Physics Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
+    variables: [thetao, so, uo, vo, zos]
+    data_kind: forecast
+    frequency: daily
+    format: NetCDF
+    purpose: "Forecast temperature, salinity, currents and sea level"
+    status: planned
+    access: "Copernicus Marine subset; account credentials required"
+
+  - id: copernicus_waves_forecast
+    priority: P0
+    source: Copernicus Marine
+    product: "Global Ocean Waves Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
+    variables: [VHM0, VTM02, VMDR]
+    data_kind: forecast
+    frequency: 3-hourly
+    format: NetCDF
+    purpose: "Wave height, period and direction"
+    status: planned
+    access: "Copernicus Marine subset; account credentials required"
+
+  - id: copernicus_bgc_forecast
+    priority: P1
+    source: Copernicus Marine
+    product: "Global Ocean Biogeochemistry Analysis and Forecast"
+    dataset_id: "cmems_mod_glo_bgc_anfc_0.25deg_P1D-m"
+    variables: [chl]
+    data_kind: forecast
+    frequency: daily
+    format: NetCDF
+    purpose: "Chlorophyll/productivity context"
+    status: planned
+    access: "Copernicus Marine subset; account credentials required"
 
   - id: noaa_erddap_observations
     priority: P2
