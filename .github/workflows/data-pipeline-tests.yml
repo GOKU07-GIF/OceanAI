@@ -1,0 +1,45 @@
+name: OceanAI data pipeline tests
+
+on:
+  push:
+    branches:
+      - fix/oceanai-integration
+  pull_request:
+    branches:
+      - fix/oceanai-integration
+  workflow_dispatch:
+
+jobs:
+  data-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+
+      - name: Validate INCOIS query builder
+        run: |
+          python scripts/python/test_incois_query_builder.py
+
+      - name: Run ORCA normalized-store tests
+        env:
+          PYTHONPATH: backend
+        run: |
+          pytest -q backend/tests/test_orca_ocean_adapter.py
+
+      - name: Compile data scripts
+        run: |
+          python -m py_compile scripts/python/download_incois_erddap.py
+          python -m py_compile scripts/python/verify_incois_sources.py
+          python -m py_compile scripts/python/ingest_ocean_parquet.py
+          python -m py_compile scripts/python/report_ocean_data.py
