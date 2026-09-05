@@ -90,6 +90,19 @@ jobs:
             --min-lon 68 --max-lon 78 --min-lat 8 --max-lat 24 \
             --output-dir datasets/raw/copernicus
 
+      - name: Build normalized data manifest
+        if: always()
+        run: |
+          python scripts/python/build_data_manifest.py \
+            datasets/raw/copernicus \
+            --output datasets/raw/copernicus/manifest.json
+
+      - name: Report acquired files
+        if: always()
+        run: |
+          echo "Acquisition directory:"
+          find datasets/raw/copernicus -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
+
       - name: Upload Copernicus artifacts
         if: always()
         uses: actions/upload-artifact@v4
