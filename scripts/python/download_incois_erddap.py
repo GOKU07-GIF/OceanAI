@@ -6,9 +6,22 @@ those files into a normalized long-form CSV or Parquet table.
 Configured public gridded sources include INCOIS SST, value-added ocean
 products, OCM chlorophyll/optical products, QuickSCAT wind and monthly ARGO VAM
 temperature/salinity profiles.
+
+HTTPS uses the platform trust store through ``truststore`` when available.
+This keeps normal certificate verification enabled and avoids ``verify=False``.
 """
 
 from __future__ import annotations
+
+# Use the native OS certificate store before importing requests/urllib3.
+try:
+    import truststore
+except ImportError as exc:  # pragma: no cover - dependency/configuration boundary
+    raise SystemExit(
+        "truststore is required. Run: python -m pip install truststore"
+    ) from exc
+
+truststore.inject_into_ssl()
 
 import argparse
 from pathlib import Path
@@ -119,12 +132,19 @@ def build_query(config: dict, start: str, end: str, args: argparse.Namespace) ->
 
 def download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url, timeout=180, stream=True) as response:
-        response.raise_for_status()
-        with destination.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    handle.write(chunk)
+    try:
+        with requests.get(url, timeout=180, stream=True) as response:
+            response.raise_for_status()
+            with destination.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+    except requests.exceptions.SSLError as exc:
+        raise RuntimeError(
+            "INCOIS TLS verification failed. The downloader is using the native "
+            "OS trust store; install your organization's/antivirus proxy CA in "
+            "Windows Trusted Root Certification Authorities if HTTPS is being inspected."
+        ) from exc
 
 
 def validate_dataset(path: Path, expected_variables: list[str], expected_dimensions: list[str]) -> xr.Dataset:
