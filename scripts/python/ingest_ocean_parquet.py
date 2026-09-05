@@ -4,9 +4,10 @@ The input files are expected to use the canonical ocean observation schema:
     timestamp, latitude, longitude, depth_m, variable, value, unit,
     source, dataset, data_type, quality_flag
 
-DATABASE_URL is read from the environment. The script is deliberately separate
-from the download pipeline so acquisition and database loading can be retried
-independently.
+The database URL is taken from DATABASE_URL when explicitly set. Otherwise,
+the existing OceanAI application settings are used, which load backend/.env.
+The script is deliberately separate from the download pipeline so acquisition
+and database loading can be retried independently.
 
 The script resolves the repository's backend package automatically, so it can
 be executed from the repository root or from any working directory.
@@ -36,6 +37,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.ocean_observation import OceanObservation
 
 REQUIRED_COLUMNS = {
@@ -136,9 +138,13 @@ def main() -> None:
     engine = None
     session = None
     if not args.dry_run:
-        database_url = os.getenv("DATABASE_URL")
+        # Prefer an explicit process-level override, but fall back to the
+        # application's existing settings so backend/.env is reused.
+        database_url = os.getenv("DATABASE_URL") or settings.DATABASE_URL
         if not database_url:
-            raise SystemExit("DATABASE_URL environment variable is required")
+            raise SystemExit(
+                "Database URL is unavailable. Set DATABASE_URL or configure it in backend/.env"
+            )
         engine = create_engine(database_url, pool_pre_ping=True)
         session = Session(engine)
 
