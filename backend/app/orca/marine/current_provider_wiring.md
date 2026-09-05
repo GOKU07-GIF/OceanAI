@@ -1,0 +1,1 @@
+Copernicus surface currents are provided by backend/app/orca/marine/copernicus_currents.py using dataset cmems_mod_glo_phy_anfc_merged-uv_PT1H-i. The provider exposes canonical current_speed_ms and current_direction_deg fields for ORCA. Keep provider registration aligned with the marine provider registry before requesting these fields from the composite provider.
