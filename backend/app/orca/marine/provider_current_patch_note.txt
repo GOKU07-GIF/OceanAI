@@ -1,3 +1,0 @@
-Surface-current provider module added at backend/app/orca/marine/copernicus_currents.py.
-Copernicus SMOC dataset: cmems_mod_glo_phy_anfc_merged-uv_PT1H-i.
-Register the provider in backend/app/orca/marine/provider.py before enabling current fields in ORCA requests.
