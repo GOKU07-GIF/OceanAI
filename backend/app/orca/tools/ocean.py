@@ -4,7 +4,6 @@ from datetime import datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import Any, Iterable
 
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.ocean_data import OceanData
@@ -47,7 +46,6 @@ _VARIABLE_ALIASES: dict[str, str] = {
     "wind_speed_m_s": "wind_speed_m_s",
     "wind_stress": "wind_stress_pa",
 }
-
 
 _REQUEST_TO_VARIABLES: dict[str, set[str]] = {
     "sst_c": {"sst_c"},
@@ -119,8 +117,7 @@ def _query_normalized_observations(
     start_time: str | None,
     end_time: str | None,
 ) -> list[dict[str, Any]]:
-    # A bounding box keeps the SQL query small; the exact great-circle filter
-    # is applied in Python so this works without a PostGIS dependency.
+    """Query the shared normalized data store around a selected point."""
     lat_delta = radius_km / 111.0
     lon_scale = max(cos(radians(latitude)), 0.2)
     lon_delta = radius_km / (111.0 * lon_scale)
@@ -149,9 +146,8 @@ def _query_normalized_observations(
 
         observations.append(_serialize_observation(row, distance))
 
-    # Prefer the nearest/latest row for each canonical variable. This keeps the
-    # ORCA context compact while still preserving source provenance.
-    observations.sort(key=lambda item: (item["distance_km"], item["timestamp"]), reverse=False)
+    observations.sort(key=lambda item: (item["distance_km"], item["timestamp"]))
+
     selected: list[dict[str, Any]] = []
     seen_variables: set[str] = set()
     for item in observations:
@@ -232,10 +228,10 @@ def get_ocean_conditions(
 ) -> dict[str, Any]:
     """Return nearby normalized ocean data for ORCA with source provenance.
 
-    Normalized provider data is shared reference data and is therefore queried
-    from ``ocean_observations`` without the legacy owner filter. The old
-    OceanData table remains a fallback so existing deployments do not break
-    before the first real data ingestion completes.
+    Normalized provider data is shared reference data and is queried from
+    ``ocean_observations`` without the legacy owner filter. The old OceanData
+    table remains a fallback so existing deployments do not break before the
+    first real provider-data ingestion completes.
     """
     requested = _requested_canonical_variables(requested_variables)
     observations = _query_normalized_observations(
