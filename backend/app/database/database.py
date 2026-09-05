@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.models.refresh_token import RefreshToken
 from app.models.ocean_data import OceanData
+from app.models.ocean_observation import OceanObservation
 from app.models.sensor_device import SensorDevice
 from app.models.sensor_reading import SensorReading
 from app.models.sos import SOS
