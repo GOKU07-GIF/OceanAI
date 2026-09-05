@@ -4,13 +4,13 @@ The input files are expected to use the canonical ocean observation schema:
     timestamp, latitude, longitude, depth_m, variable, value, unit,
     source, dataset, data_type, quality_flag
 
+Provider-specific variable names are mapped to canonical names before insert
+so the shared observation store can be queried consistently by ORCA.
+
 The database URL is taken from DATABASE_URL when explicitly set. Otherwise,
 the existing OceanAI application settings are used, which load backend/.env.
 The script is deliberately separate from the download pipeline so acquisition
 and database loading can be retried independently.
-
-The script resolves the repository's backend package automatically, so it can
-be executed from the repository root or from any working directory.
 
 Examples:
   python scripts/python/ingest_ocean_parquet.py datasets/raw/incois/sst_*.parquet
@@ -56,6 +56,33 @@ REQUIRED_COLUMNS = {
 
 DEFAULT_CHUNK_SIZE = 5000
 
+# Provider -> canonical OceanAI variable names.
+VARIABLE_ALIASES = {
+    "sst": "sst_c",
+    "anom": "sst_anomaly_c",
+    "MLD": "mld_m",
+    "D20": "d20_m",
+    "GEO_U": "current_u_cm_s",
+    "GEO_V": "current_v_cm_s",
+    "WIND_SPEED": "wind_speed_m_s",
+    "CHL": "chlorophyll_mg_m3",
+    "SAL": "salinity_psu",
+    "TEMP": "temperature_c",
+}
+
+UNIT_ALIASES = {
+    "sst_c": "degC",
+    "sst_anomaly_c": "degC",
+    "mld_m": "m",
+    "d20_m": "m",
+    "current_u_cm_s": "cm/s",
+    "current_v_cm_s": "cm/s",
+    "wind_speed_m_s": "m/s",
+    "chlorophyll_mg_m3": "mg/m3",
+    "salinity_psu": "PSU",
+    "temperature_c": "degC",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ingest normalized ocean files into PostgreSQL")
@@ -89,9 +116,15 @@ def read_table(path: Path) -> pd.DataFrame:
     frame["quality_flag"] = frame["quality_flag"].fillna("present").astype(str)
     frame["source"] = frame["source"].astype(str)
     frame["dataset"] = frame["dataset"].astype(str)
-    frame["variable"] = frame["variable"].astype(str)
     frame["data_type"] = frame["data_type"].astype(str)
+
+    raw_variables = frame["variable"].astype(str)
+    frame["variable"] = raw_variables.map(lambda name: VARIABLE_ALIASES.get(name, name))
     frame["unit"] = frame["unit"].fillna("").astype(str)
+    frame["unit"] = frame.apply(
+        lambda row: UNIT_ALIASES.get(row["variable"], row["unit"]),
+        axis=1,
+    )
 
     return frame[
         [
@@ -138,8 +171,6 @@ def main() -> None:
     engine = None
     session = None
     if not args.dry_run:
-        # Prefer an explicit process-level override, but fall back to the
-        # application's existing settings so backend/.env is reused.
         database_url = os.getenv("DATABASE_URL") or settings.DATABASE_URL
         if not database_url:
             raise SystemExit(
