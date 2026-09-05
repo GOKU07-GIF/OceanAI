@@ -12,7 +12,6 @@ import argparse
 import json
 import re
 from pathlib import Path
-from urllib.parse import quote
 
 import requests
 
@@ -22,12 +21,10 @@ DATASETS = {
     "sst": {
         "dataset_id": "NOAA_AVHRR_AMSR_datasets",
         "variables": ["sst", "anom"],
-        "dimensions": 4,
     },
     "value_added": {
         "dataset_id": "incois_valueadded_products_datasets",
         "variables": ["MLD", "ILD", "D26", "D20", "GEO_U", "GEO_V"],
-        "dimensions": 3,
     },
     "quickscat": {
         "dataset_id": "incois_quickscat_daily_datasets",
@@ -36,17 +33,14 @@ DATASETS = {
             "WIND_STRESS", "ZONAL_WIND_STRESS", "MERI_WIND_STRESS",
             "WIND_STRESS_CURL",
         ],
-        "dimensions": 3,
     },
     "oceansat2": {
         "dataset_id": "incois_oceansat2_datasets",
         "variables": ["CHL", "KD490", "TSM"],
-        "dimensions": 3,
     },
     "argo_vam": {
         "dataset_id": "incois_argo_mnt_VAM",
         "variables": ["TEMP", "TERR", "SAL", "SERR"],
-        "dimensions": 4,
     },
 }
 
@@ -54,7 +48,7 @@ DATASETS = {
 def request(url: str, timeout: int = 30) -> tuple[bool, int, str]:
     try:
         response = requests.get(url, timeout=timeout)
-        return response.ok, response.status_code, response.text[:1200]
+        return response.ok, response.status_code, response.text
     except requests.RequestException as exc:
         return False, 0, str(exc)
 
@@ -64,28 +58,26 @@ def verify_dataset(alias: str, config: dict) -> dict:
     metadata_url = f"{BASE_URL}/info/{dataset_id}/index.json"
     das_url = f"{BASE_URL}/griddap/{dataset_id}.das"
 
-    metadata_ok, metadata_status, metadata_detail = request(metadata_url)
-    das_ok, das_status, das_detail = request(das_url)
+    metadata_ok, metadata_status, metadata_text = request(metadata_url)
+    das_ok, das_status, das_text = request(das_url)
 
     variable_checks = {
-        variable: bool(re.search(rf"\b{re.escape(variable)}\s*\{{", das_detail))
+        variable: bool(re.search(rf"\b{re.escape(variable)}\s*\{{", das_text))
         for variable in config["variables"]
     }
 
-    dimensions_ok = False
+    dimensions_detected = []
     if metadata_ok:
         try:
-            payload = json.loads(metadata_detail)
-            dimensions_ok = any(
-                entry.get("type") == "dimension"
-                for entry in payload
-                if isinstance(entry, dict)
-            )
+            payload = json.loads(metadata_text)
+            if isinstance(payload, list):
+                dimensions_detected = [
+                    str(item.get("name"))
+                    for item in payload
+                    if isinstance(item, dict) and item.get("type") == "dimension"
+                ]
         except json.JSONDecodeError:
-            # ERDDAP metadata endpoints may be truncated by the verifier's
-            # response preview; the DAS variable check still provides useful
-            # source evidence.
-            dimensions_ok = True
+            dimensions_detected = []
 
     all_variables_ok = all(variable_checks.values()) if variable_checks else False
     status = "available" if metadata_ok and das_ok and all_variables_ok else "needs_review"
@@ -93,12 +85,11 @@ def verify_dataset(alias: str, config: dict) -> dict:
     return {
         "alias": alias,
         "dataset_id": dataset_id,
-        "expected_dimensions": config["dimensions"],
         "checks": {
             "metadata": {"ok": metadata_ok, "status": metadata_status},
             "das": {"ok": das_ok, "status": das_status},
             "variables": variable_checks,
-            "metadata_dimensions_detected": dimensions_ok,
+            "dimensions_detected": dimensions_detected,
         },
         "status": status,
     }
@@ -113,12 +104,15 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
+    passed = 0
     for result in results:
+        if result["status"] == "available":
+            passed += 1
         print(f"{result['alias']}: {result['status']} ({result['dataset_id']})")
         for variable, ok in result["checks"]["variables"].items():
             print(f"  {variable}: {'OK' if ok else 'MISSING'}")
 
-    if not any(result["status"] == "available" for result in results):
+    if passed == 0:
         raise SystemExit("No configured INCOIS dataset passed source checks")
 
 
