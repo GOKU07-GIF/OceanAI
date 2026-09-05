@@ -1,6 +1,9 @@
 name: INCOIS data smoke acquisition
 
 on:
+  push:
+    branches:
+      - fix/oceanai-integration
   workflow_dispatch:
   schedule:
     - cron: "30 2 * * 1"
