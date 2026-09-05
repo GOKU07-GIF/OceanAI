@@ -28,6 +28,7 @@ from app.database.base import Base
 
 from app.models.user import User
 from app.models.ocean_data import OceanData
+from app.models.ocean_observation import OceanObservation
 from app.models.refresh_token import RefreshToken
 from app.models.sos import SOS
 from app.models.alert import Alert
