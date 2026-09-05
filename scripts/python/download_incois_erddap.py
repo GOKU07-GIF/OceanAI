@@ -42,13 +42,20 @@ DATASETS = {
     },
     "quickscat": {
         "dataset_id": "incois_quickscat_daily_datasets",
-        "variables": ["WIND_SPEED", "ZONAL_WIND_SPEED", "MERI_WIND_SPEED", "WIND_STRESS"],
+        "variables": [
+            "WIND_SPEED", "ZONAL_WIND_SPEED", "MERI_WIND_SPEED",
+            "WIND_STRESS", "ZONAL_WIND_STRESS", "MERI_WIND_STRESS",
+            "WIND_STRESS_CURL",
+        ],
         "dimensions": ["time", "latitude", "longitude"],
         "units": {
             "WIND_SPEED": "m/s",
             "ZONAL_WIND_SPEED": "m/s",
             "MERI_WIND_SPEED": "m/s",
             "WIND_STRESS": "Pa",
+            "ZONAL_WIND_STRESS": "Pa",
+            "MERI_WIND_STRESS": "Pa",
+            "WIND_STRESS_CURL": "Pa/m",
         },
         "data_type": "historical_observation",
     },
@@ -61,15 +68,15 @@ DATASETS = {
     },
     "argo_vam": {
         "dataset_id": "incois_argo_mnt_VAM",
-        "variables": ["TEMP", "SAL"],
+        "variables": ["TEMP", "SAL", "TERR", "SERR"],
         "dimensions": ["time", "ZAX", "latitude", "longitude"],
-        "range": {"ZAX": (5.0, 2000.0)},
-        "units": {"TEMP": "degC", "SAL": "PSU"},
+        "range": {"ZAX": (5.0, 200.0)},
+        "units": {"TEMP": "degs", "SAL": "PSU", "TERR": "degs", "SERR": "PSU"},
         "data_type": "historical_profile",
     },
 }
 
-DEFAULT_BBOX = (50.0, 90.0, 0.0, 25.0)
+DEFAULT_BBOX = (68.0, 78.0, 8.0, 24.0)
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,23 +98,23 @@ def parse_args() -> argparse.Namespace:
 
 def constraint(dimension: str, start: str, end: str, args: argparse.Namespace, config: dict) -> str:
     if dimension == "time":
-        return f"time[({start}):1:({end})]"
+        return f"[({start}):1:({end})]"
     if dimension == "latitude":
-        return f"latitude[({args.min_lat}):1:({args.max_lat})]"
+        return f"[({args.min_lat}):1:({args.max_lat})]"
     if dimension == "longitude":
-        return f"longitude[({args.min_lon}):1:({args.max_lon})]"
+        return f"[({args.min_lon}):1:({args.max_lon})]"
     if dimension == "ZAX":
-        return f"ZAX[({args.min_depth}):1:({args.max_depth})]"
+        return f"[({args.min_depth}):1:({args.max_depth})]"
     fixed_value = config.get("fixed", {}).get(dimension)
     if fixed_value is not None:
-        return f"{dimension}[({fixed_value}):1:({fixed_value})]"
+        return f"[({fixed_value}):1:({fixed_value})]"
     raise ValueError(f"No constraint configured for required dimension: {dimension}")
 
 
 def build_query(config: dict, start: str, end: str, args: argparse.Namespace) -> str:
-    variables = ",".join(config["variables"])
+    """Build a valid ERDDAP projection with constraints for each variable."""
     dimensions = "".join(constraint(d, start, end, args, config) for d in config["dimensions"])
-    return f"{variables}{dimensions}"
+    return ",".join(f"{variable}{dimensions}" for variable in config["variables"])
 
 
 def download(url: str, destination: Path) -> None:
@@ -178,17 +185,8 @@ def flatten_to_ocean_table(
 
     return result[
         [
-            "timestamp",
-            "latitude",
-            "longitude",
-            "depth_m",
-            "variable",
-            "value",
-            "unit",
-            "source",
-            "dataset",
-            "data_type",
-            "quality_flag",
+            "timestamp", "latitude", "longitude", "depth_m", "variable",
+            "value", "unit", "source", "dataset", "data_type", "quality_flag",
         ]
     ].sort_values(["timestamp", "variable", "latitude", "longitude"])
 
