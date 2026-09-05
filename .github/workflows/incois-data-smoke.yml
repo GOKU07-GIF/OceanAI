@@ -41,6 +41,13 @@ jobs:
         run: |
           python scripts/python/acquire_incois_core.py --continue-on-error
 
+      - name: Build normalized data manifest
+        if: always()
+        run: |
+          python scripts/python/build_data_manifest.py \
+            datasets/raw/incois \
+            --output datasets/raw/incois/manifest.json
+
       - name: Report acquired files
         if: always()
         run: |
