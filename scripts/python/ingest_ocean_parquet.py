@@ -8,6 +8,9 @@ DATABASE_URL is read from the environment. The script is deliberately separate
 from the download pipeline so acquisition and database loading can be retried
 independently.
 
+The script resolves the repository's backend package automatically, so it can
+be executed from the repository root or from any working directory.
+
 Examples:
   python scripts/python/ingest_ocean_parquet.py datasets/raw/incois/sst_*.parquet
   python scripts/python/ingest_ocean_parquet.py datasets/raw/incois/*.csv --dry-run
@@ -17,7 +20,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
+
+# scripts/python/ -> scripts/ -> repository root; backend/ contains the `app`
+# package used by the SQLAlchemy model. Add it explicitly so this CLI works
+# without requiring PYTHONPATH to be configured by the caller.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 import pandas as pd
 from sqlalchemy import create_engine
