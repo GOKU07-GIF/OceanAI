@@ -30,6 +30,8 @@ VARIABLE_MAP = {
     "GEO_V": "current_v_cm_s",
     # INCOIS Oceansat-2 OCM
     "CHL": "chlorophyll_mg_m3",
+    "KD490": "diffuse_attenuation_m_inv",
+    "TSM": "total_suspended_matter_mg_l",
     # Common Copernicus aliases
     "thetao": "temperature_c",
     "so": "salinity_psu",
