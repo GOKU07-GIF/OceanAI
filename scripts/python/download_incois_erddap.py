@@ -4,7 +4,7 @@ The script downloads small regional/time subsets as NetCDF and can transform
 those files into a normalized long-form CSV or Parquet table.
 
 Configured public gridded sources include INCOIS SST, value-added ocean
-products, OCM chlorophyll, QuickSCAT wind fields, and monthly ARGO VAM
+products, OCM chlorophyll/optical products, QuickSCAT wind and monthly ARGO VAM
 temperature/salinity profiles.
 """
 
@@ -24,41 +24,40 @@ OUTPUT_DIR = Path("datasets/raw/incois")
 DATASETS = {
     "sst": {
         "dataset_id": "NOAA_AVHRR_AMSR_datasets",
-        "variables": ["sst"],
+        "variables": ["sst", "anom"],
         "dimensions": ["time", "zlev", "latitude", "longitude"],
         "fixed": {"zlev": 0.0},
-        "units": {"sst": "degC"},
-        "data_type": "observation",
+        "units": {"sst": "degC", "anom": "degC"},
+        "data_type": "historical_observation",
     },
     "value_added": {
         "dataset_id": "incois_valueadded_products_datasets",
-        "variables": ["MLD", "D20", "GEO_U", "GEO_V"],
+        "variables": ["MLD", "ILD", "D26", "D20", "GEO_U", "GEO_V"],
         "dimensions": ["time", "latitude", "longitude"],
         "units": {
-            "MLD": "m",
-            "D20": "m",
-            "GEO_U": "cm/s",
-            "GEO_V": "cm/s",
+            "MLD": "m", "ILD": "m", "D26": "m", "D20": "m",
+            "GEO_U": "cm/s", "GEO_V": "cm/s",
         },
-        "data_type": "observation",
-    },
-    "chlorophyll": {
-        "dataset_id": "IRS_chlorophyll_datasets",
-        "variables": ["CHLOROPHYLL"],
-        "dimensions": ["time", "latitude", "longitude"],
-        "units": {"CHLOROPHYLL": "mg/m3"},
-        "data_type": "observation",
+        "data_type": "historical_ocean_product",
     },
     "quickscat": {
         "dataset_id": "incois_quickscat_daily_datasets",
-        "variables": ["WIND_SPEED", "ZONAL_WIND_SPEED", "MERI_WIND_SPEED"],
+        "variables": ["WIND_SPEED", "ZONAL_WIND_SPEED", "MERI_WIND_SPEED", "WIND_STRESS"],
         "dimensions": ["time", "latitude", "longitude"],
         "units": {
             "WIND_SPEED": "m/s",
             "ZONAL_WIND_SPEED": "m/s",
             "MERI_WIND_SPEED": "m/s",
+            "WIND_STRESS": "Pa",
         },
-        "data_type": "observation",
+        "data_type": "historical_observation",
+    },
+    "oceansat2": {
+        "dataset_id": "incois_oceansat2_datasets",
+        "variables": ["CHL", "KD490", "TSM"],
+        "dimensions": ["time", "latitude", "longitude"],
+        "units": {"CHL": "mg/m3", "KD490": "1/m", "TSM": "mg/L"},
+        "data_type": "historical_observation",
     },
     "argo_vam": {
         "dataset_id": "incois_argo_mnt_VAM",
@@ -77,12 +76,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download a public INCOIS ERDDAP subset")
     parser.add_argument("--dataset", choices=sorted(DATASETS), help="Configured dataset alias")
     parser.add_argument("--list", action="store_true", help="List configured datasets")
-    parser.add_argument("--start", help="Start time, e.g. 2011-10-01T00:00:00Z")
-    parser.add_argument("--end", help="End time, e.g. 2011-10-03T00:00:00Z")
+    parser.add_argument("--start", required=False, help="Start time, e.g. 2011-10-01T00:00:00Z")
+    parser.add_argument("--end", required=False, help="End time, e.g. 2011-10-03T00:00:00Z")
     parser.add_argument("--min-lon", type=float, default=DEFAULT_BBOX[0])
     parser.add_argument("--max-lon", type=float, default=DEFAULT_BBOX[1])
     parser.add_argument("--min-lat", type=float, default=DEFAULT_BBOX[2])
     parser.add_argument("--max-lat", type=float, default=DEFAULT_BBOX[3])
+    parser.add_argument("--min-depth", type=float, default=5.0)
+    parser.add_argument("--max-depth", type=float, default=200.0)
     parser.add_argument("--format", choices=["nc", "csv", "parquet"], default="nc")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     return parser.parse_args()
@@ -95,13 +96,11 @@ def constraint(dimension: str, start: str, end: str, args: argparse.Namespace, c
         return f"latitude[({args.min_lat}):1:({args.max_lat})]"
     if dimension == "longitude":
         return f"longitude[({args.min_lon}):1:({args.max_lon})]"
+    if dimension == "ZAX":
+        return f"ZAX[({args.min_depth}):1:({args.max_depth})]"
     fixed_value = config.get("fixed", {}).get(dimension)
     if fixed_value is not None:
         return f"{dimension}[({fixed_value}):1:({fixed_value})]"
-    range_value = config.get("range", {}).get(dimension)
-    if range_value is not None:
-        minimum, maximum = range_value
-        return f"{dimension}[({minimum}):1:({maximum})]"
     raise ValueError(f"No constraint configured for required dimension: {dimension}")
 
 
@@ -153,11 +152,13 @@ def flatten_to_ocean_table(
     data_type: str,
 ) -> pd.DataFrame:
     frame = ds.to_dataframe().reset_index()
-    value_columns = [c for c in frame.columns if c not in {"time", "latitude", "longitude", "zlev", "ZAX"}]
+    coordinate_columns = {"time", "latitude", "longitude", "zlev", "ZAX"}
+    value_columns = [c for c in frame.columns if c not in coordinate_columns]
     rows: list[pd.DataFrame] = []
 
     for variable in value_columns:
-        part = frame[["time", "latitude", "longitude", variable]].copy()
+        coord_columns = [c for c in ["time", "latitude", "longitude", "ZAX"] if c in frame.columns]
+        part = frame[coord_columns + [variable]].copy()
         part = part.rename(columns={variable: "value"})
         part["variable"] = variable
         part["source"] = source
@@ -173,12 +174,14 @@ def flatten_to_ocean_table(
     result = pd.concat(rows, ignore_index=True)
     result["timestamp"] = pd.to_datetime(result.pop("time"), utc=True)
     result["unit"] = result["variable"].map(units).fillna("")
+    result["depth_m"] = result.pop("ZAX") if "ZAX" in result.columns else pd.NA
 
     return result[
         [
             "timestamp",
             "latitude",
             "longitude",
+            "depth_m",
             "variable",
             "value",
             "unit",
@@ -216,7 +219,8 @@ def main() -> None:
     print(f"  variables: {', '.join(config['variables'])}")
     print(f"  bbox    : {args.min_lon},{args.max_lon},{args.min_lat},{args.max_lat}")
     print(f"  time    : {args.start} -> {args.end}")
-    print(f"  url     : {url}")
+    if "ZAX" in config["dimensions"]:
+        print(f"  depth   : {args.min_depth} -> {args.max_depth} m")
 
     download(url, nc_path)
     ds = validate_dataset(nc_path, config["variables"], config["dimensions"])
