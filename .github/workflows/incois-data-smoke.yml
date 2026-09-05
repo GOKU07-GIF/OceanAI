@@ -1,0 +1,39 @@
+name: INCOIS data smoke acquisition
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * 1"
+
+jobs:
+  acquire-incois-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install data tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas pyarrow requests xarray netCDF4
+
+      - name: Acquire INCOIS core smoke batch
+        run: |
+          python scripts/python/acquire_incois_core.py --continue-on-error
+
+      - name: Upload acquired data artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incois-core-data
+          path: datasets/raw/incois/
+          if-no-files-found: warn
+          retention-days: 7
