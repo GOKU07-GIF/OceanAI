@@ -21,6 +21,7 @@ import copernicusmarine
 import pandas as pd
 import xarray as xr
 
+ROOT = Path(__file__).resolve().parents[2]
 DATASET_ID = "cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
 VARIABLES = ["VHM0", "VTM02", "VMDR"]
 VARIABLE_MAP = {
@@ -29,6 +30,8 @@ VARIABLE_MAP = {
     "VMDR": "wave_direction_deg",
 }
 DEFAULT_BBOX = (68.0, 78.0, 8.0, 24.0)
+DEFAULT_OUTPUT_DIR = ROOT / "datasets" / "raw" / "copernicus"
+DEFAULT_PROCESSED_DIR = ROOT / "datasets" / "processed" / "copernicus"
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,8 +42,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-lon", type=float, default=DEFAULT_BBOX[1])
     parser.add_argument("--min-lat", type=float, default=DEFAULT_BBOX[2])
     parser.add_argument("--max-lat", type=float, default=DEFAULT_BBOX[3])
-    parser.add_argument("--output-dir", type=Path, default=Path("datasets/raw/copernicus"))
-    parser.add_argument("--processed-dir", type=Path, default=Path("datasets/processed/copernicus"))
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED_DIR)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -61,7 +64,7 @@ def find_coord(ds: xr.Dataset, aliases: list[str]) -> str:
     raise ValueError(f"Could not find coordinate; tried {aliases}")
 
 
-def normalize(path: Path, start: str, end: str) -> pd.DataFrame:
+def normalize(path: Path) -> pd.DataFrame:
     ds = xr.open_dataset(path)
     try:
         time_name = find_coord(ds, ["time"])
@@ -92,8 +95,7 @@ def normalize(path: Path, start: str, end: str) -> pd.DataFrame:
             part["dataset"] = DATASET_ID
             part["data_type"] = "forecast"
             part["quality_flag"] = "present"
-            units = ds[provider_name].attrs.get("units", "")
-            part["unit"] = str(units)
+            part["unit"] = str(ds[provider_name].attrs.get("units", ""))
             part["depth_m"] = pd.NA
             rows.append(part)
 
@@ -142,6 +144,8 @@ def main() -> None:
     print(f"  variables: {', '.join(VARIABLES)}")
     print(f"  bbox    : {args.min_lon},{args.max_lon},{args.min_lat},{args.max_lat}")
     print(f"  time    : {start} -> {end}")
+    print(f"  raw     : {nc_path}")
+    print(f"  processed: {parquet_path}")
 
     request = {
         "dataset_id": DATASET_ID,
@@ -174,7 +178,7 @@ def main() -> None:
     finally:
         ds.close()
 
-    table = normalize(nc_path, start, end)
+    table = normalize(nc_path)
     table.to_parquet(parquet_path, index=False)
     print(f"Transformed: {parquet_path}")
     print(f"Rows: {len(table)}")
