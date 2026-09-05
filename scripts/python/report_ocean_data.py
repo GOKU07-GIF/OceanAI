@@ -3,16 +3,34 @@
 The report is intentionally read-only. It helps us verify that real provider
 data has been ingested before ORCA is allowed to rely on the shared store.
 
-Usage:
-  DATABASE_URL=... python scripts/python/report_ocean_data.py
-  DATABASE_URL=... python scripts/python/report_ocean_data.py --variable sst_c
+Usage from repository root or backend directory:
+  python scripts/python/report_ocean_data.py
+  python scripts/python/report_ocean_data.py --variable sst_c
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import sys
 from collections.abc import Sequence
+from pathlib import Path
+
+# Make the backend package importable when this script is invoked directly.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+# Load the project's backend/.env when DATABASE_URL is not already exported.
+try:
+    from dotenv import load_dotenv
+except ImportError as exc:  # pragma: no cover - dependency/configuration boundary
+    raise SystemExit(
+        "python-dotenv is required. Run: python -m pip install python-dotenv"
+    ) from exc
+
+load_dotenv(BACKEND_ROOT / ".env", override=False)
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
@@ -62,7 +80,9 @@ def main() -> None:
     args = parse_args()
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise SystemExit("DATABASE_URL environment variable is required")
+        raise SystemExit(
+            f"DATABASE_URL not found. Export it or add it to {BACKEND_ROOT / '.env'}"
+        )
 
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
