@@ -40,6 +40,7 @@ from app.models.ocean_observation import OceanObservation
 
 CANONICAL_VARIABLES = (
     "sst_c",
+    "sst_anomaly_c",
     "wave_height_m",
     "wave_period_s",
     "wave_direction_deg",
