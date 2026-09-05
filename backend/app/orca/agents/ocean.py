@@ -29,7 +29,7 @@ _FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
 
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
-    """Collect local observations plus authoritative marine-source context."""
+    """Collect normalized local observations plus authoritative marine context."""
     location = state.get("location")
     db = state.get("db")
     if not location:
@@ -68,34 +68,32 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         "errors": [],
     }
 
+    requested_time = state.get("requested_time") or {}
     local_result = get_ocean_conditions(
         db=db,
         latitude=location["latitude"],
         longitude=location["longitude"],
         owner_id=state["user_id"],
+        radius_km=250.0,
+        limit=20,
+        requested_variables=requested_variables,
+        start_time=requested_time.get("start"),
+        end_time=requested_time.get("end"),
     )
 
     local_agent_result = {
         "agent": "ocean",
         "status": local_result.get("status", "error"),
-        "source": local_result.get("source", "OceanAI PostgreSQL"),
-        "dataset": local_result.get("dataset", "OceanData"),
+        "source": local_result.get("source", "OceanAI normalized observation store"),
+        "dataset": local_result.get("dataset", "ocean_observations"),
         "observation_count": local_result.get("observation_count", 0),
         "observations": local_result.get("observations", []),
+        "fallback": local_result.get("fallback", False),
     }
     updates["agent_results"].append(local_agent_result)
 
     if local_result.get("status") == "success":
-        updates["evidence"].append(
-            {
-                "source": local_result.get("source"),
-                "dataset": local_result.get("dataset"),
-                "type": local_result.get("type"),
-                "location": local_result.get("location"),
-                "radius_km": local_result.get("radius_km"),
-                "observations": local_result.get("observations", []),
-            }
-        )
+        updates["evidence"].append(local_result)
 
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
@@ -104,12 +102,10 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         "radius_km": 50.0,
     }
 
-    if state.get("requested_time"):
-        requested_time = state["requested_time"]
-        if requested_time.get("start"):
-            marine_request["start_time"] = requested_time["start"]
-        if requested_time.get("end"):
-            marine_request["end_time"] = requested_time["end"]
+    if requested_time.get("start"):
+        marine_request["start_time"] = requested_time["start"]
+    if requested_time.get("end"):
+        marine_request["end_time"] = requested_time["end"]
 
     marine_result = marine_provider.fetch(
         request=marine_request,
@@ -140,9 +136,6 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     if isinstance(marine_data, dict):
         updates["evidence"].append(marine_data)
 
-    # PFZ is an official advisory service. Return exact point data when the
-    # public response exposes it; otherwise preserve advisory metadata and a
-    # warning rather than inferring a fishing location.
     if is_fishing_query:
         pfz_tool = tool_registry.get("get_pfz_advisory")
         pfz_result = pfz_tool(language=state.get("language", "en"))
