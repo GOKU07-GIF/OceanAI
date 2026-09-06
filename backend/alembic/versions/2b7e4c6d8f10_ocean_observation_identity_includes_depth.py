@@ -1,7 +1,7 @@
 """Include depth in normalized ocean observation identity.
 
 Revision ID: 2b7e4c6d8f10
-Revises: b84c0e7d2a91
+Revises: b84c0e7d2a91 and bc7d2e4f5a61
 Create Date: 2026-09-06
 
 Profile products such as ARGO can contain multiple depth levels at the same
@@ -9,6 +9,10 @@ Profile products such as ARGO can contain multiple depth levels at the same
 not include depth_m, so most profile rows were incorrectly skipped as
 conflicts. Surface/gridded observations with a missing depth are normalized to
 0 m before the new constraint is created so reruns remain idempotent.
+
+This migration intentionally merges the two historical canonicalization
+revisions because some existing databases were already stamped through either
+one. Both predecessor migrations are idempotent provider-name repairs.
 """
 
 from alembic import op
@@ -16,7 +20,7 @@ import sqlalchemy as sa
 
 
 revision: str = "2b7e4c6d8f10"
-down_revision: str = "b84c0e7d2a91"
+down_revision = ("b84c0e7d2a91", "bc7d2e4f5a61")
 branch_labels = None
 depends_on = None
 
