@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -91,10 +92,10 @@ class CopernicusMarineChlorophyllProvider:
             "coordinates_selection_method": "nearest",
         }
 
-        username = __import__("os").getenv(
+        username = os.getenv(
             "COPERNICUSMARINE_SERVICE_USERNAME"
         )
-        password = __import__("os").getenv(
+        password = os.getenv(
             "COPERNICUSMARINE_SERVICE_PASSWORD"
         )
 
@@ -103,7 +104,7 @@ class CopernicusMarineChlorophyllProvider:
             kwargs["password"] = password
 
         # Prefer the caller's requested window. Otherwise only inspect a
-        # recent window rather than requesting an unbounded historical archive.
+        # recent window rather than requesting an unbounded archive.
         if request.get("start_time"):
             kwargs["start_datetime"] = request["start_time"]
         if request.get("end_time"):
@@ -114,8 +115,8 @@ class CopernicusMarineChlorophyllProvider:
             kwargs["start_datetime"] = (
                 now - timedelta(days=8)
             ).isoformat()
-            # Do not force `end_datetime=now`; the provider may lag by a day
-            # while the product is being updated.
+            # Do not force an end time because the product can lag while
+            # the latest daily observation is being published.
 
         try:
             dataset = copernicusmarine.open_dataset(**kwargs)
@@ -132,7 +133,9 @@ class CopernicusMarineChlorophyllProvider:
             if COPERNICUS_CHL_VARIABLE not in selected.variables:
                 return {
                     "status": "unavailable",
-                    "error": "Copernicus Marine returned no chlorophyll variable.",
+                    "error": (
+                        "Copernicus Marine returned no chlorophyll variable."
+                    ),
                 }
 
             raw_value = selected[COPERNICUS_CHL_VARIABLE].values
@@ -141,7 +144,9 @@ class CopernicusMarineChlorophyllProvider:
             if value is None:
                 return {
                     "status": "unavailable",
-                    "error": "Copernicus Marine returned no valid chlorophyll value.",
+                    "error": (
+                        "Copernicus Marine returned no valid chlorophyll value."
+                    ),
                 }
 
             retrieved_at = datetime.now(
