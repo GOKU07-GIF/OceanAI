@@ -31,7 +31,7 @@ _FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
 
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
-    """Collect normalized local observations plus authoritative marine context."""
+    """Collect normalized observations plus authoritative live marine context."""
     location = state.get("location")
     db = state.get("db")
     if not location:
@@ -111,14 +111,10 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         ),
     }
 
-    updates["agent_results"].append(
-        local_agent_result
-    )
+    updates["agent_results"].append(local_agent_result)
 
     if local_result.get("status") == "success":
-        updates["evidence"].append(
-            local_result
-        )
+        updates["evidence"].append(local_result)
 
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
@@ -133,16 +129,14 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     if requested_time.get("end"):
         marine_request["end_time"] = requested_time["end"]
 
-    # Prefer Copernicus for current/model-backed marine conditions.
-    # INCOIS remains available as a fallback for variables Copernicus
-    # cannot supply.
+    # Live ORCA conditions must come from current/operational providers.
+    # Do not fall back to the historical INCOIS SST adapter here because
+    # that dataset is not a current forecast source.
     marine_result = marine_provider.fetch(
         request=marine_request,
         provider_order=(
             "copernicus",
-            "incois",
             "copernicus_chlorophyll",
-            "mosdac",
         ),
     )
 
@@ -183,9 +177,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         marine_agent_result["conditions"] = marine_data
         updates["evidence"].append(marine_data)
 
-    updates["agent_results"].append(
-        marine_agent_result
-    )
+    updates["agent_results"].append(marine_agent_result)
 
     if is_fishing_query:
         pfz_tool = tool_registry.get(
@@ -247,12 +239,8 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
             ),
         }
 
-        updates["agent_results"].append(
-            pfz_agent_result
-        )
-        updates["evidence"].append(
-            pfz_result
-        )
+        updates["agent_results"].append(pfz_agent_result)
+        updates["evidence"].append(pfz_result)
 
         if pfz_result.get("error"):
             updates["errors"].append(
