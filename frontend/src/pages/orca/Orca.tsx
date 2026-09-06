@@ -115,6 +115,8 @@ export default function Orca(): React.JSX.Element {
   const [longitude, setLongitude] = useState<number | null>(null);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isFindingLocation, setIsFindingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const orca = useOrca();
   const result = orca.data;
   const recommendation = result?.recommendation;
@@ -138,7 +140,12 @@ export default function Orca(): React.JSX.Element {
   const sources = collectSources(result?.evidence);
   const missingEvidence = collectMissingEvidence(recommendationFactors);
 
-  const handleLocationSelect = (lat: number, lng: number): void => { setLatitude(lat); setLongitude(lng); };
+  const handleLocationSelect = (lat: number, lng: number): void => {
+    setLatitude(lat);
+    setLongitude(lng);
+    setLocationError(null);
+  };
+
   const handleAsk = (): void => {
     const trimmed = query.trim();
     if (!trimmed || orca.isPending) return;
@@ -152,12 +159,92 @@ export default function Orca(): React.JSX.Element {
       },
     });
   };
-  const startNewConversation = (): void => { setConversationId(undefined); setMessages([]); setQuery(""); orca.reset(); };
+
+  const handleNearMe = (): void => {
+    const nearMeQuery = "Fishing conditions near me";
+
+    if (orca.isPending || isFindingLocation) return;
+
+    setLocationError(null);
+
+    if (!navigator.geolocation) {
+      setLocationError("Location detection is not supported by this browser.");
+      setQuery(nearMeQuery);
+      return;
+    }
+
+    setIsFindingLocation(true);
+    setQuery(nearMeQuery);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLatitude = position.coords.latitude;
+        const nextLongitude = position.coords.longitude;
+
+        setLatitude(nextLatitude);
+        setLongitude(nextLongitude);
+        setIsFindingLocation(false);
+
+        setMessages((current) => [
+          ...current,
+          {
+            id: `${Date.now()}-user`,
+            role: "user",
+            text: nearMeQuery,
+          },
+        ]);
+
+        setQuery("");
+
+        orca.mutate(
+          {
+            query: nearMeQuery,
+            language: "en",
+            latitude: nextLatitude,
+            longitude: nextLongitude,
+            ...(conversationId ? { conversation_id: conversationId } : {}),
+          },
+          {
+            onSuccess: (response) => {
+              if (response.conversation_id) setConversationId(response.conversation_id);
+              const assistantText = response.assistant_response ?? getStringValue(response.recommendation, "recommendation") ?? "ORCA returned structured data without a response message.";
+              setMessages((current) => [...current, { id: `${Date.now()}-assistant`, role: "assistant", text: assistantText }]);
+            },
+          },
+        );
+      },
+      (error) => {
+        let message = "Unable to detect your location.";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = "Location permission was denied. Allow location access and try again.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            message = "Your current location is unavailable. Try again in a moment.";
+            break;
+          case error.TIMEOUT:
+            message = "Location detection timed out. Try again.";
+            break;
+          default:
+            break;
+        }
+        setLocationError(message);
+        setIsFindingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      },
+    );
+  };
+
+  const startNewConversation = (): void => { setConversationId(undefined); setMessages([]); setQuery(""); setLocationError(null); orca.reset(); };
 
   return <div className="space-y-6">
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-3"><div className="rounded-xl bg-cyan-500/10 p-3 text-cyan-400"><Bot size={30} /></div><div><h1 className="text-3xl font-bold text-white">ORCA Assistant</h1><p className="mt-1 text-sm text-slate-400">Ocean Research & Catch Advisory</p></div></div><div className="flex items-center gap-2 self-start rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-medium text-green-400 md:self-auto"><span className="h-2 w-2 rounded-full bg-green-400" /> Ready</div></div>
 
-    <section className="rounded-2xl border border-cyan-500/20 bg-slate-800 p-6 shadow-lg shadow-cyan-950/10"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Ask ORCA</h2></div>{messages.length > 0 && <button type="button" onClick={startNewConversation} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 hover:border-cyan-500/40 hover:text-cyan-300">New conversation</button>}</div><p className="mt-2 text-sm text-slate-400">Ask about ocean conditions, fishing suitability, safety, or marine observations.</p><div className="mt-5 flex flex-col gap-3 md:flex-row"><input type="text" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && handleAsk()} placeholder="e.g. Is it safe to go fishing near Mumbai tomorrow?" className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-400" /><button type="button" onClick={handleAsk} disabled={!query.trim() || orca.isPending} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">{orca.isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{orca.isPending ? "Thinking..." : "Ask ORCA"}</button></div><div className="mt-4 flex flex-wrap gap-2">{["Fishing conditions near Mumbai", "Ocean safety tomorrow", "Best conditions for fishing"].map((question) => <button key={question} type="button" onClick={() => setQuery(question)} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300">{question}</button>)}</div></section>
+    <section className="rounded-2xl border border-cyan-500/20 bg-slate-800 p-6 shadow-lg shadow-cyan-950/10"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Ask ORCA</h2></div>{messages.length > 0 && <button type="button" onClick={startNewConversation} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 hover:border-cyan-500/40 hover:text-cyan-300">New conversation</button>}</div><p className="mt-2 text-sm text-slate-400">Ask about ocean conditions, fishing suitability, safety, or marine observations.</p><div className="mt-5 flex flex-col gap-3 md:flex-row"><input type="text" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && handleAsk()} placeholder="e.g. Is it safe to go fishing near me tomorrow?" className="min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-cyan-400" /><button type="button" onClick={handleAsk} disabled={!query.trim() || orca.isPending || isFindingLocation} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">{orca.isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{orca.isPending ? "Thinking..." : "Ask ORCA"}</button></div><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={handleNearMe} disabled={orca.isPending || isFindingLocation} className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300 hover:border-cyan-400/50 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50">{isFindingLocation ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}{isFindingLocation ? "Finding me..." : "Fishing conditions near me"}</button>{["Ocean safety tomorrow", "Best conditions for fishing"].map((question) => <button key={question} type="button" onClick={() => setQuery(question)} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300">{question}</button>)}</div>{locationError && <p className="mt-3 text-xs text-amber-300" role="alert">{locationError}</p>}</section>
 
     {messages.length > 0 && <section className="rounded-2xl border border-slate-700 bg-slate-800 p-6"><div className="flex items-center gap-2 text-white"><MessageCircle size={20} className="text-cyan-400" /><h2 className="text-xl font-semibold">Conversation</h2>{conversationId && <span className="text-xs text-slate-600">Session active</span>}</div><div className="mt-4 max-h-96 space-y-4 overflow-y-auto pr-1">{messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === "user" ? "bg-cyan-500 text-slate-950" : "border border-slate-700 bg-slate-900 text-slate-200"}`}><p className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">{message.role === "user" ? "You" : "ORCA"}</p><p className="whitespace-pre-wrap">{message.text}</p></div></div>)}{orca.isPending && <div className="flex justify-start"><div className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-400"><Loader2 size={16} className="mr-2 inline animate-spin" />ORCA is thinking...</div></div>}</div></section>}
 
