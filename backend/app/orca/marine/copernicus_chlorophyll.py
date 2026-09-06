@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.orca.marine.models import MarineDataRequest
@@ -17,32 +17,60 @@ class CopernicusMarineChlorophyllProvider:
     The product is a daily satellite observation product, not a future
     forecast. It is therefore only used as observation/context evidence for
     fishing analysis.
+
+    Authentication follows the same policy as the main Copernicus provider:
+    explicit environment credentials are used when present; otherwise the
+    copernicusmarine package uses credentials saved by `copernicusmarine login`.
     """
 
     name = "copernicus_chlorophyll"
 
-    def __init__(self, *, dataset_id: str = COPERNICUS_CHL_DATASET_ID) -> None:
+    def __init__(
+        self,
+        *,
+        dataset_id: str = COPERNICUS_CHL_DATASET_ID,
+    ) -> None:
         self.dataset_id = dataset_id
+
+    @staticmethod
+    def _scalar(value: Any) -> float | None:
+        if value is None:
+            return None
+
+        try:
+            if hasattr(value, "size") and value.size != 1:
+                return None
+            if hasattr(value, "item"):
+                value = value.item()
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        return number if math.isfinite(number) else None
 
     def fetch(self, request: MarineDataRequest) -> dict[str, Any]:
         requested = request.get("variables", [])
-        if requested and COPERNICUS_CHL_VARIABLE not in requested and "chlorophyll_mg_m3" not in requested:
+
+        if (
+            requested
+            and COPERNICUS_CHL_VARIABLE not in requested
+            and "chlorophyll_mg_m3" not in requested
+        ):
             return {
                 "status": "unavailable",
-                "error": "Copernicus chlorophyll adapter supports chlorophyll_mg_m3 only.",
+                "error": (
+                    "Copernicus chlorophyll adapter supports "
+                    "chlorophyll_mg_m3 only."
+                ),
             }
 
         latitude = request.get("latitude")
         longitude = request.get("longitude")
-        if latitude is None or longitude is None:
-            return {"status": "unavailable", "error": "Latitude and longitude are required."}
 
-        username = os.getenv("COPERNICUSMARINE_SERVICE_USERNAME")
-        password = os.getenv("COPERNICUSMARINE_SERVICE_PASSWORD")
-        if not username or not password:
+        if latitude is None or longitude is None:
             return {
                 "status": "unavailable",
-                "error": "Copernicus Marine credentials are not configured.",
+                "error": "Latitude and longitude are required.",
             }
 
         try:
@@ -55,43 +83,70 @@ class CopernicusMarineChlorophyllProvider:
 
         kwargs: dict[str, Any] = {
             "dataset_id": self.dataset_id,
-            "username": username,
-            "password": password,
             "variables": [COPERNICUS_CHL_VARIABLE],
-            "minimum_longitude": longitude,
-            "maximum_longitude": longitude,
-            "minimum_latitude": latitude,
-            "maximum_latitude": latitude,
+            "minimum_longitude": float(longitude),
+            "maximum_longitude": float(longitude),
+            "minimum_latitude": float(latitude),
+            "maximum_latitude": float(latitude),
             "coordinates_selection_method": "nearest",
         }
 
+        username = __import__("os").getenv(
+            "COPERNICUSMARINE_SERVICE_USERNAME"
+        )
+        password = __import__("os").getenv(
+            "COPERNICUSMARINE_SERVICE_PASSWORD"
+        )
+
+        if username and password:
+            kwargs["username"] = username
+            kwargs["password"] = password
+
+        # Prefer the caller's requested window. Otherwise only inspect a
+        # recent window rather than requesting an unbounded historical archive.
         if request.get("start_time"):
             kwargs["start_datetime"] = request["start_time"]
         if request.get("end_time"):
             kwargs["end_datetime"] = request["end_time"]
 
+        if not request.get("start_time") and not request.get("end_time"):
+            now = datetime.now(timezone.utc)
+            kwargs["start_datetime"] = (
+                now - timedelta(days=8)
+            ).isoformat()
+            # Do not force `end_datetime=now`; the provider may lag by a day
+            # while the product is being updated.
+
         try:
             dataset = copernicusmarine.open_dataset(**kwargs)
+
             selected = dataset.sel(
-                latitude=latitude,
-                longitude=longitude,
+                latitude=float(latitude),
+                longitude=float(longitude),
                 method="nearest",
             )
 
             if "time" in selected.dims:
-                selected = selected.isel(time=0)
+                selected = selected.isel(time=-1)
 
-            raw_value = selected[COPERNICUS_CHL_VARIABLE].values
-            if hasattr(raw_value, "size") and raw_value.size != 1:
-                raw_value = raw_value.reshape(-1)[0]
-            if hasattr(raw_value, "item"):
-                raw_value = raw_value.item()
-
-            if raw_value is None:
+            if COPERNICUS_CHL_VARIABLE not in selected.variables:
                 return {
                     "status": "unavailable",
-                    "error": "Copernicus Marine returned no chlorophyll value.",
+                    "error": "Copernicus Marine returned no chlorophyll variable.",
                 }
+
+            raw_value = selected[COPERNICUS_CHL_VARIABLE].values
+            value = self._scalar(raw_value)
+
+            if value is None:
+                return {
+                    "status": "unavailable",
+                    "error": "Copernicus Marine returned no valid chlorophyll value.",
+                }
+
+            retrieved_at = datetime.now(
+                timezone.utc
+            ).isoformat(timespec="seconds")
 
             data: dict[str, Any] = {
                 "source": "Copernicus Marine",
@@ -104,22 +159,33 @@ class CopernicusMarineChlorophyllProvider:
                 "timestamp": (
                     str(selected["time"].values)
                     if "time" in selected.coords
-                    else datetime.now(timezone.utc).isoformat()
+                    else retrieved_at
                 ),
-                "retrieved_at": datetime.now(timezone.utc).isoformat(),
-                "chlorophyll_mg_m3": float(raw_value),
+                "retrieved_at": retrieved_at,
+                "chlorophyll_mg_m3": value,
                 "quality": "provider-dataset",
                 "metadata": {
                     "dataset_id": self.dataset_id,
                     "variable": COPERNICUS_CHL_VARIABLE,
-                    "note": "Near-real-time daily satellite ocean-colour observation; not a future forecast.",
+                    "note": (
+                        "Near-real-time daily satellite ocean-colour "
+                        "observation; not a future forecast."
+                    ),
                 },
             }
-            return {"status": "success", "data": data}
+
+            return {
+                "status": "success",
+                "data": data,
+            }
+
         except Exception as exc:  # pragma: no cover - provider/network boundary
             return {
                 "status": "unavailable",
-                "error": f"Copernicus chlorophyll request failed: {exc}",
+                "error": (
+                    "Copernicus chlorophyll request failed: "
+                    f"{exc}"
+                ),
             }
 
 
