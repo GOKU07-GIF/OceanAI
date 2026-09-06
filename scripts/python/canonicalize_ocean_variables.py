@@ -52,8 +52,9 @@ VARIABLE_MAP = {
     "WIND_STRESS_CURL": "wind_stress_curl_pa_m",
 }
 
-# Provider sentinel values documented by INCOIS QuickSCAT. Remove these before
-# canonicalization so they are never mistaken for physical observations.
+# Provider sentinel values documented by INCOIS QuickSCAT. ERDDAP/xarray can
+# round these slightly when materializing float data (for example 327.67 can
+# become 327.669983), so matching uses a small absolute tolerance below.
 FILL_VALUES = {
     "WIND_SPEED": {327.67},
     "ZONAL_WIND_SPEED": {327.67},
@@ -63,6 +64,7 @@ FILL_VALUES = {
     "MERI_WIND_STRESS": {32.767},
     "WIND_STRESS_CURL": {3.2767e-5},
 }
+FILL_MATCH_TOLERANCE = 1e-3
 
 REQUIRED_COLUMNS = {
     "timestamp",
@@ -98,10 +100,15 @@ def remove_fill_values(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     numeric = pd.to_numeric(frame["value"], errors="coerce")
     drop_mask = numeric.isna()
 
+    provider_variables = frame["variable"].astype(str)
     for provider_variable, fill_values in FILL_VALUES.items():
-        mask = frame["variable"].astype(str).eq(provider_variable)
-        if mask.any():
-            drop_mask |= mask & numeric.isin(fill_values)
+        mask = provider_variables.eq(provider_variable)
+        if not mask.any():
+            continue
+        for fill_value in fill_values:
+            # Use a tolerance because float32 provider values can become
+            # 327.669983 / 32.766998 instead of the documented decimal fill.
+            drop_mask |= mask & ((numeric - fill_value).abs() <= FILL_MATCH_TOLERANCE)
 
     dropped = int(drop_mask.sum())
     return frame.loc[~drop_mask].copy(), dropped
