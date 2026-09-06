@@ -10,6 +10,8 @@ MARINE_VARIABLES = (
     "current_speed_ms",
     "current_direction_deg",
     "sst_c",
+    "temperature_c",
+    "salinity_psu",
     "chlorophyll_mg_m3",
     "pfz_available",
     "advisories",
@@ -54,12 +56,15 @@ class MarineConditions(TypedDict, total=False):
     location: MarineLocation
     timestamp: str
     retrieved_at: str
+    depth_m: float
     wave_height_m: float
     swell_height_m: float
     wave_period_s: float
     current_speed_ms: float
     current_direction_deg: float
     sst_c: float
+    temperature_c: float
+    salinity_psu: float
     chlorophyll_mg_m3: float
     pfz_available: bool
     advisories: list[MarineAdvisory]
