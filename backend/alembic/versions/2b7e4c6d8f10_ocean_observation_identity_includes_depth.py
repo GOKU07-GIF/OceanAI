@@ -1,7 +1,7 @@
 """Include depth in normalized ocean observation identity.
 
 Revision ID: 2b7e4c6d8f10
-Revises: 9a5c2d3e4f61
+Revises: b84c0e7d2a91
 Create Date: 2026-09-06
 
 Profile products such as ARGO can contain multiple depth levels at the same
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision: str = "2b7e4c6d8f10"
-down_revision: str = "9a5c2d3e4f61"
+down_revision: str = "b84c0e7d2a91"
 branch_labels = None
 depends_on = None
 
