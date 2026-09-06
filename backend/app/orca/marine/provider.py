@@ -31,7 +31,11 @@ class MarineProviderRegistry:
         return self._providers.get(name)
 
     def ordered(self, names: Sequence[str]) -> list[MarineProvider]:
-        return [provider for name in names if (provider := self.get(name)) is not None]
+        return [
+            provider
+            for name in names
+            if (provider := self.get(name)) is not None
+        ]
 
     def names(self) -> list[str]:
         return list(self._providers)
@@ -65,10 +69,12 @@ class CompositeMarineProvider:
                 "status": "unavailable",
                 "data": None,
                 "missing_variables": missing or list(MARINE_VARIABLES),
-                "errors": [{
-                    "source": "registry",
-                    "error": "No marine data provider is registered for this request.",
-                }],
+                "errors": [
+                    {
+                        "source": "registry",
+                        "error": "No marine data provider is registered for this request.",
+                    }
+                ],
             }
 
         for provider in providers:
@@ -81,30 +87,46 @@ class CompositeMarineProvider:
 
             try:
                 result = provider.fetch(provider_request)
-            except Exception as exc:  # pragma: no cover - defensive provider boundary
-                errors.append({"source": provider.name, "error": str(exc)})
+            except Exception as exc:  # pragma: no cover
+                errors.append(
+                    {
+                        "source": provider.name,
+                        "error": str(exc),
+                    }
+                )
                 continue
 
             if result.get("status") != "success":
-                errors.append({
-                    "source": provider.name,
-                    "error": str(result.get("error", "Provider returned an unsuccessful status.")),
-                })
+                errors.append(
+                    {
+                        "source": provider.name,
+                        "error": str(
+                            result.get(
+                                "error",
+                                "Provider returned an unsuccessful status.",
+                            )
+                        ),
+                    }
+                )
                 continue
 
             data_candidates: list[dict[str, Any]] = []
+
             data = result.get("data")
             if isinstance(data, dict):
                 data_candidates.append(data)
+
             for item in result.get("data_parts", []):
                 if isinstance(item, dict):
                     data_candidates.append(item)
 
             if not data_candidates:
-                errors.append({
-                    "source": provider.name,
-                    "error": "Provider returned success without canonical data.",
-                })
+                errors.append(
+                    {
+                        "source": provider.name,
+                        "error": "Provider returned success without canonical data.",
+                    }
+                )
                 continue
 
             for candidate in data_candidates:
@@ -112,16 +134,27 @@ class CompositeMarineProvider:
                     candidate,
                     fallback_source=provider.name,
                 )
+
                 contribution = {
                     "provider": provider.name,
-                    "source": normalized.get("source", provider.name),
-                    "dataset": normalized.get("dataset", "unknown"),
-                    "type": normalized.get("type", "mixed"),
+                    "source": normalized.get(
+                        "source",
+                        provider.name,
+                    ),
+                    "dataset": normalized.get(
+                        "dataset",
+                        "unknown",
+                    ),
+                    "type": normalized.get(
+                        "type",
+                        "mixed",
+                    ),
                     "variables": [],
                 }
 
                 for variable in list(missing):
                     value = normalized.get(variable)
+
                     if value is not None:
                         merged_data[variable] = value
                         contribution["variables"].append(variable)
@@ -137,10 +170,22 @@ class CompositeMarineProvider:
 
             for detail in result.get("errors", []):
                 if isinstance(detail, dict):
-                    errors.append({
-                        "source": str(detail.get("source", provider.name)),
-                        "error": str(detail.get("error", "provider error")),
-                    })
+                    errors.append(
+                        {
+                            "source": str(
+                                detail.get(
+                                    "source",
+                                    provider.name,
+                                )
+                            ),
+                            "error": str(
+                                detail.get(
+                                    "error",
+                                    "provider error",
+                                )
+                            ),
+                        }
+                    )
 
         if not merged_data:
             return {
@@ -170,7 +215,11 @@ class CompositeMarineProvider:
             "data": combined,
             "missing_variables": missing,
             "errors": errors,
-            "provider": contributions[0]["provider"] if len(contributions) == 1 else "composite",
+            "provider": (
+                contributions[0]["provider"]
+                if len(contributions) == 1
+                else "composite"
+            ),
             "provider_contributions": contributions,
         }
 
@@ -180,25 +229,36 @@ def normalize_marine_conditions(
     *,
     fallback_source: str,
 ) -> MarineConditions:
-    """Normalize a provider payload without inventing absent marine values."""
+    """Normalize provider payloads without inventing missing values."""
     normalized: MarineConditions = {
-        "source": str(payload.get("source") or fallback_source),
-        "dataset": str(payload.get("dataset") or "unknown"),
+        "source": str(
+            payload.get("source") or fallback_source
+        ),
+        "dataset": str(
+            payload.get("dataset") or "unknown"
+        ),
         "type": payload.get("type", "mixed"),
-        "quality": str(payload.get("quality") or "unknown"),
-        "metadata": dict(payload.get("metadata") or {}),
+        "quality": str(
+            payload.get("quality") or "unknown"
+        ),
+        "metadata": dict(
+            payload.get("metadata") or {}
+        ),
     }
 
     for key in (
         "location",
         "timestamp",
         "retrieved_at",
+        "depth_m",
         "wave_height_m",
         "swell_height_m",
         "wave_period_s",
         "current_speed_ms",
         "current_direction_deg",
         "sst_c",
+        "temperature_c",
+        "salinity_psu",
         "chlorophyll_mg_m3",
         "pfz_available",
         "advisories",
@@ -213,4 +273,7 @@ marine_provider_registry = MarineProviderRegistry()
 marine_provider_registry.register(incois_provider)
 marine_provider_registry.register(copernicus_provider)
 marine_provider_registry.register(copernicus_chlorophyll_provider)
-marine_provider = CompositeMarineProvider(marine_provider_registry)
+
+marine_provider = CompositeMarineProvider(
+    marine_provider_registry
+)
