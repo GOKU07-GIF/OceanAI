@@ -83,6 +83,8 @@ UNIT_ALIASES = {
     "temperature_c": "degC",
 }
 
+PROFILE_DATA_TYPE_MARKERS = ("profile", "profiles")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ingest normalized ocean files into PostgreSQL")
@@ -125,6 +127,18 @@ def read_table(path: Path) -> pd.DataFrame:
         lambda row: UNIT_ALIASES.get(row["variable"], row["unit"]),
         axis=1,
     )
+
+    # Surface/gridded datasets do not carry a depth coordinate. Store them at
+    # an explicit 0 m so the depth-inclusive uniqueness rule remains idempotent
+    # for reruns. Profile datasets must carry a real depth instead of silently
+    # becoming surface observations.
+    profile_mask = frame["data_type"].str.lower().str.contains("|".join(PROFILE_DATA_TYPE_MARKERS), regex=True, na=False)
+    missing_profile_depth = profile_mask & frame["depth_m"].isna()
+    if missing_profile_depth.any():
+        raise ValueError(
+            f"Profile data contains {int(missing_profile_depth.sum())} rows without depth_m"
+        )
+    frame.loc[~profile_mask, "depth_m"] = frame.loc[~profile_mask, "depth_m"].fillna(0.0)
 
     return frame[
         [
