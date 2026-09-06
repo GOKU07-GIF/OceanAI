@@ -7,31 +7,74 @@ from app.orca.time import resolve_requested_time
 
 
 def plan_query(state: ORCAState) -> dict[str, Any]:
-    """Create a deterministic task plan and resolve common time windows."""
+    """Create a deterministic specialist plan and resolve common time windows."""
     query = state.get("query", "").lower()
 
     tasks: list[dict[str, str]] = []
     activity = "general_marine_information"
 
-    fishing_terms = ("fishing", "fish", "pfz", "fishing zone")
-    safety_terms = ("safe", "safety", "danger", "hazard", "risk")
-    weather_terms = ("weather", "wind", "rain", "storm", "lightning", "cyclone")
-    ocean_terms = ("ocean", "wave", "swell", "current", "sst", "sea", "chlorophyll")
-    route_terms = ("route", "navigate", "navigation", "direction")
+    fishing_terms = (
+        "fishing",
+        "fish",
+        "pfz",
+        "fishing zone",
+    )
+    safety_terms = (
+        "safe",
+        "safety",
+        "danger",
+        "hazard",
+        "risk",
+    )
+    weather_terms = (
+        "weather",
+        "wind",
+        "rain",
+        "storm",
+        "lightning",
+        "cyclone",
+    )
+    ocean_terms = (
+        "ocean",
+        "wave",
+        "swell",
+        "current",
+        "sst",
+        "sea",
+        "chlorophyll",
+        "salinity",
+    )
+    route_terms = (
+        "route",
+        "navigate",
+        "navigation",
+        "direction",
+    )
 
     def add_task(agent: str, reason: str) -> None:
         if not any(task["agent"] == agent for task in tasks):
-            tasks.append({"agent": agent, "reason": reason})
+            tasks.append(
+                {
+                    "agent": agent,
+                    "reason": reason,
+                }
+            )
 
     if any(term in query for term in fishing_terms):
         activity = "fishing"
+
         add_task(
             "ocean",
-            "Fishing-related queries may require marine conditions and PFZ information.",
+            "Fishing queries require marine conditions and PFZ information.",
+        )
+        add_task(
+            "weather",
+            "Fishing conditions also depend on forecast wind, rain, and hazards.",
         )
 
     if any(term in query for term in safety_terms):
         activity = "marine_safety"
+
         add_task(
             "weather",
             "Safety assessment requires forecast and hazard information.",
@@ -71,12 +114,15 @@ def plan_query(state: ORCAState) -> dict[str, Any]:
             "Default marine information lookup for an unspecified query.",
         )
 
-    requested_time = resolve_requested_time(state.get("query", ""))
+    requested_time = resolve_requested_time(
+        state.get("query", "")
+    )
 
     updates: dict[str, Any] = {
         "activity": activity,
         "plan": tasks,
     }
+
     if requested_time:
         updates["requested_time"] = requested_time
 
