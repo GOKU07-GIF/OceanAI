@@ -19,6 +19,7 @@ _MARINE_SAFETY_VARIABLES = [
 
 _MARINE_FISHING_VARIABLES = [
     "sst_c",
+    "salinity_psu",
     "wave_height_m",
     "wave_period_s",
     "chlorophyll_mg_m3",
@@ -59,7 +60,9 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     query = state.get("query", "").lower()
     is_fishing_query = any(term in query for term in _FISHING_TERMS)
     requested_variables = (
-        _MARINE_FISHING_VARIABLES if is_fishing_query else _MARINE_SAFETY_VARIABLES
+        _MARINE_FISHING_VARIABLES
+        if is_fishing_query
+        else _MARINE_SAFETY_VARIABLES
     )
 
     updates: dict[str, Any] = {
@@ -69,6 +72,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     }
 
     requested_time = state.get("requested_time") or {}
+
     local_result = get_ocean_conditions(
         db=db,
         latitude=location["latitude"],
@@ -84,16 +88,36 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     local_agent_result = {
         "agent": "ocean",
         "status": local_result.get("status", "error"),
-        "source": local_result.get("source", "OceanAI normalized observation store"),
-        "dataset": local_result.get("dataset", "ocean_observations"),
-        "observation_count": local_result.get("observation_count", 0),
-        "observations": local_result.get("observations", []),
-        "fallback": local_result.get("fallback", False),
+        "source": local_result.get(
+            "source",
+            "OceanAI normalized observation store",
+        ),
+        "dataset": local_result.get(
+            "dataset",
+            "ocean_observations",
+        ),
+        "observation_count": local_result.get(
+            "observation_count",
+            0,
+        ),
+        "observations": local_result.get(
+            "observations",
+            [],
+        ),
+        "fallback": local_result.get(
+            "fallback",
+            False,
+        ),
     }
-    updates["agent_results"].append(local_agent_result)
+
+    updates["agent_results"].append(
+        local_agent_result
+    )
 
     if local_result.get("status") == "success":
-        updates["evidence"].append(local_result)
+        updates["evidence"].append(
+            local_result
+        )
 
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
@@ -104,6 +128,7 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
 
     if requested_time.get("start"):
         marine_request["start_time"] = requested_time["start"]
+
     if requested_time.get("end"):
         marine_request["end_time"] = requested_time["end"]
 
@@ -118,52 +143,123 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     )
 
     marine_data = marine_result.get("data")
+
     marine_agent_result: dict[str, Any] = {
         "agent": "ocean",
-        "status": marine_result.get("status", "unavailable"),
-        "source": marine_data.get("source") if isinstance(marine_data, dict) else "marine provider",
-        "dataset": marine_data.get("dataset") if isinstance(marine_data, dict) else "marine data",
+        "status": marine_result.get(
+            "status",
+            "unavailable",
+        ),
+        "source": (
+            marine_data.get("source")
+            if isinstance(marine_data, dict)
+            else "marine provider"
+        ),
+        "dataset": (
+            marine_data.get("dataset")
+            if isinstance(marine_data, dict)
+            else "marine data"
+        ),
         "requested_variables": requested_variables,
-        "missing_variables": marine_result.get("missing_variables", []),
-        "provider_contributions": marine_result.get("provider_contributions", []),
-        "errors": marine_result.get("errors", []),
+        "missing_variables": marine_result.get(
+            "missing_variables",
+            [],
+        ),
+        "provider_contributions": marine_result.get(
+            "provider_contributions",
+            [],
+        ),
+        "errors": marine_result.get(
+            "errors",
+            [],
+        ),
     }
+
     if isinstance(marine_data, dict):
         marine_agent_result["conditions"] = marine_data
-
-    updates["agent_results"].append(marine_agent_result)
-
-    if isinstance(marine_data, dict):
         updates["evidence"].append(marine_data)
 
+    updates["agent_results"].append(
+        marine_agent_result
+    )
+
     if is_fishing_query:
-        pfz_tool = tool_registry.get("get_pfz_advisory")
-        pfz_result = pfz_tool(language=state.get("language", "en"))
+        pfz_tool = tool_registry.get(
+            "get_pfz_advisory"
+        )
+
+        pfz_result = pfz_tool(
+            language=state.get(
+                "language",
+                "en",
+            )
+        )
+
         pfz_agent_result = {
             "agent": "ocean",
             "capability": "pfz",
-            "status": pfz_result.get("status", "unavailable"),
-            "source": pfz_result.get("source", "INCOIS"),
-            "dataset": pfz_result.get("dataset", "PFZ Text Advisory"),
-            "advisory_date": pfz_result.get("advisory_date"),
-            "valid_until": pfz_result.get("valid_until"),
-            "locations": pfz_result.get("locations", []),
-            "pfz_available": pfz_result.get("pfz_available", False),
-            "quality": pfz_result.get("quality"),
-            "warning": pfz_result.get("location_warning"),
-            "webgis_url": pfz_result.get("webgis_url"),
-            "text_url": pfz_result.get("text_url"),
-            "errors": [pfz_result["error"]] if pfz_result.get("error") else [],
+            "status": pfz_result.get(
+                "status",
+                "unavailable",
+            ),
+            "source": pfz_result.get(
+                "source",
+                "INCOIS",
+            ),
+            "dataset": pfz_result.get(
+                "dataset",
+                "PFZ Text Advisory",
+            ),
+            "advisory_date": pfz_result.get(
+                "advisory_date"
+            ),
+            "valid_until": pfz_result.get(
+                "valid_until"
+            ),
+            "locations": pfz_result.get(
+                "locations",
+                [],
+            ),
+            "pfz_available": pfz_result.get(
+                "pfz_available",
+                False,
+            ),
+            "quality": pfz_result.get(
+                "quality"
+            ),
+            "warning": pfz_result.get(
+                "location_warning"
+            ),
+            "webgis_url": pfz_result.get(
+                "webgis_url"
+            ),
+            "text_url": pfz_result.get(
+                "text_url"
+            ),
+            "errors": (
+                [pfz_result["error"]]
+                if pfz_result.get("error")
+                else []
+            ),
         }
-        updates["agent_results"].append(pfz_agent_result)
-        updates["evidence"].append(pfz_result)
+
+        updates["agent_results"].append(
+            pfz_agent_result
+        )
+        updates["evidence"].append(
+            pfz_result
+        )
+
         if pfz_result.get("error"):
-            updates["errors"].append(f"INCOIS PFZ: {pfz_result['error']}")
+            updates["errors"].append(
+                f"INCOIS PFZ: {pfz_result['error']}"
+            )
 
     if marine_result.get("errors"):
         updates["errors"].extend(
             [
-                f"{item.get('source', 'marine')}: {item.get('error', 'provider error')}"
+                f"{item.get('source', 'marine')}: "
+                f"{item.get('error', 'provider error')}"
                 for item in marine_result["errors"]
                 if isinstance(item, dict)
             ]
