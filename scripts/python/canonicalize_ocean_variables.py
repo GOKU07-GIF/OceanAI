@@ -5,8 +5,8 @@ from INCOIS, Copernicus, NOAA, and other providers without provider-specific
 checks in every caller.
 
 Usage from repository root:
-  python scripts/python/canonicalize_ocean_variables.py \\
-      --input datasets/raw/incois/value_added_....parquet \\
+  python scripts/python/canonicalize_ocean_variables.py \
+      --input datasets/raw/incois/value_added_....parquet \
       --output datasets/processed/incois/value_added_....parquet
 """
 
@@ -32,6 +32,11 @@ VARIABLE_MAP = {
     "CHL": "chlorophyll_mg_m3",
     "KD490": "diffuse_attenuation_m_inv",
     "TSM": "total_suspended_matter_mg_l",
+    # INCOIS ARGO VAM
+    "TEMP": "temperature_c",
+    "SAL": "salinity_psu",
+    "TERR": "temperature_error_c",
+    "SERR": "salinity_error_psu",
     # Common Copernicus aliases
     "thetao": "temperature_c",
     "so": "salinity_psu",
@@ -106,8 +111,6 @@ def remove_fill_values(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
         if not mask.any():
             continue
         for fill_value in fill_values:
-            # Use a tolerance because float32 provider values can become
-            # 327.669983 / 32.766998 instead of the documented decimal fill.
             drop_mask |= mask & ((numeric - fill_value).abs() <= FILL_MATCH_TOLERANCE)
 
     dropped = int(drop_mask.sum())
