@@ -14,6 +14,7 @@ class OceanObservation(Base):
             "timestamp",
             "latitude",
             "longitude",
+            "depth_m",
             "variable",
             "source",
             "dataset",
@@ -25,7 +26,7 @@ class OceanObservation(Base):
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     latitude = Column(Float, nullable=False, index=True)
     longitude = Column(Float, nullable=False, index=True)
-    depth_m = Column(Float, nullable=True)
+    depth_m = Column(Float, nullable=True, index=True)
     variable = Column(String(64), nullable=False, index=True)
     value = Column(Float, nullable=False)
     unit = Column(String(32), nullable=True)
