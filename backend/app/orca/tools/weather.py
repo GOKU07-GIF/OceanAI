@@ -20,11 +20,28 @@ def _parse_window(value: str | None) -> datetime | None:
         return None
 
 
+def _as_float(value: Any) -> float | None:
+    """Convert a WeatherAPI numeric field to a finite float."""
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+
+    return number
+
+
 def _wind_ms(wind_kph: Any) -> float | None:
     """Convert WeatherAPI km/h to canonical m/s."""
-    if not isinstance(wind_kph, (int, float)):
+    value = _as_float(wind_kph)
+    if value is None:
         return None
-    return round(float(wind_kph) / 3.6, 3)
+    return round(value / 3.6, 3)
 
 
 def _filter_forecast_days(
@@ -67,6 +84,28 @@ def _filter_forecast_days(
             filtered_days.append(filtered_day)
 
     return filtered_days
+
+
+def _pick_latest_hour(
+    forecast_days: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the chronologically latest hourly forecast record."""
+    latest: dict[str, Any] | None = None
+    latest_time: datetime | None = None
+
+    for day in forecast_days:
+        for hour in day.get("hours", []):
+            raw_time = hour.get("time")
+            try:
+                parsed = datetime.fromisoformat(str(raw_time))
+            except (TypeError, ValueError):
+                continue
+
+            if latest_time is None or parsed > latest_time:
+                latest = hour
+                latest_time = parsed
+
+    return latest
 
 
 def get_weather_forecast(
@@ -126,7 +165,7 @@ def get_weather_forecast(
         )
         response.raise_for_status()
         data = response.json()
-    except requests.RequestException as exc:
+    except (requests.RequestException, ValueError) as exc:
         return {
             "status": "error",
             "source": "WeatherAPI",
@@ -134,6 +173,7 @@ def get_weather_forecast(
         }
 
     location = data.get("location", {})
+    current = data.get("current", {})
     raw_forecast_days = data.get(
         "forecast",
         {},
@@ -160,10 +200,10 @@ def get_weather_forecast(
                     "time": hour.get("time"),
                     "temperature_c": hour.get("temp_c"),
                     "feels_like_c": hour.get("feelslike_c"),
-                    "wind_kph": wind_kph,
+                    "wind_kph": _as_float(wind_kph),
                     "wind_speed_m_s": _wind_ms(wind_kph),
                     "wind_direction": hour.get("wind_dir"),
-                    "gust_kph": gust_kph,
+                    "gust_kph": _as_float(gust_kph),
                     "gust_speed_m_s": _wind_ms(gust_kph),
                     "rain_probability": hour.get("chance_of_rain"),
                     "precipitation_mm": hour.get("precip_mm"),
@@ -179,7 +219,7 @@ def get_weather_forecast(
                 "max_temperature_c": day.get("maxtemp_c"),
                 "min_temperature_c": day.get("mintemp_c"),
                 "avg_temperature_c": day.get("avgtemp_c"),
-                "max_wind_kph": max_wind_kph,
+                "max_wind_kph": _as_float(max_wind_kph),
                 "max_wind_speed_m_s": _wind_ms(max_wind_kph),
                 "rain_probability": day.get("daily_chance_of_rain"),
                 "condition": day.get("condition", {}).get("text"),
@@ -193,19 +233,14 @@ def get_weather_forecast(
         end_time=end_time,
     )
 
-    # A compact canonical wind value is useful to the ORCA frontend while
-    # keeping the complete hourly evidence for the risk engine.
-    latest_hour: dict[str, Any] | None = None
-    for day in reversed(selected_days):
-        if day.get("hours"):
-            latest_hour = day["hours"][-1]
-            break
+    # Prefer an hourly value from the requested window. If there is no
+    # matching window, use the latest available forecast hour. This avoids
+    # returning success with an empty wind field when WeatherAPI has supplied
+    # perfectly usable forecast data.
+    latest_hour = _pick_latest_hour(selected_days)
 
     if latest_hour is None:
-        for day in reversed(normalized_days):
-            if day.get("hours"):
-                latest_hour = day["hours"][-1]
-                break
+        latest_hour = _pick_latest_hour(normalized_days)
 
     retrieved_at = datetime.now(
         timezone.utc
@@ -245,6 +280,46 @@ def get_weather_forecast(
         evidence["wind_timestamp"] = latest_hour.get(
             "time"
         )
+
+    # Last fallback for unusual WeatherAPI responses that don't contain
+    # hourly forecast records but do contain current conditions. This is
+    # appropriate only when there is no explicit future window.
+    if (
+        evidence.get("wind_speed_m_s") is None
+        and start_time is None
+        and end_time is None
+    ):
+        current_wind_kph = current.get("wind_kph")
+        current_wind_ms = _wind_ms(current_wind_kph)
+
+        if current_wind_ms is not None:
+            evidence["wind_speed_m_s"] = current_wind_ms
+            evidence["wind_kph"] = _as_float(
+                current_wind_kph
+            )
+            evidence["wind_direction"] = current.get(
+                "wind_dir"
+            )
+            evidence["wind_timestamp"] = current.get(
+                "last_updated"
+            )
+
+    if (
+        evidence.get("wind_speed_m_s") is None
+        and start_time is None
+        and end_time is None
+    ):
+        # A daily max wind is a final non-null fallback for a malformed or
+        # reduced forecast response. It remains explicitly labelled as the
+        # day's maximum rather than pretending it is an hourly observation.
+        for day in reversed(normalized_days):
+            max_wind_ms = day.get("max_wind_speed_m_s")
+            if max_wind_ms is not None:
+                evidence["wind_speed_m_s"] = max_wind_ms
+                evidence["wind_kph"] = day.get("max_wind_kph")
+                evidence["wind_timestamp"] = day.get("date")
+                evidence["wind_value_type"] = "daily_max"
+                break
 
     if start and end and not selected_days:
         evidence["window_warning"] = (
