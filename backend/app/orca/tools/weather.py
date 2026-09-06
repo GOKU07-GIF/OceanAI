@@ -20,6 +20,13 @@ def _parse_window(value: str | None) -> datetime | None:
         return None
 
 
+def _wind_ms(wind_kph: Any) -> float | None:
+    """Convert WeatherAPI km/h to canonical m/s."""
+    if not isinstance(wind_kph, (int, float)):
+        return None
+    return round(float(wind_kph) / 3.6, 3)
+
+
 def _filter_forecast_days(
     forecast_days: list[dict[str, Any]],
     *,
@@ -32,19 +39,19 @@ def _filter_forecast_days(
     if start is None or end is None:
         return forecast_days
 
-    # WeatherAPI hourly timestamps are local wall-clock times without an
-    # explicit offset. Compare them with the wall-clock component of the
-    # requested window so a +05:30 request is matched to Mumbai local hours.
     if start.tzinfo is not None:
         start = start.replace(tzinfo=None)
     if end.tzinfo is not None:
         end = end.replace(tzinfo=None)
 
     filtered_days: list[dict[str, Any]] = []
+
     for day in forecast_days:
         filtered_hours: list[dict[str, Any]] = []
+
         for hour in day.get("hours", []):
             raw = hour.get("time")
+
             try:
                 hour_dt = datetime.fromisoformat(str(raw))
             except (TypeError, ValueError):
@@ -70,11 +77,7 @@ def get_weather_forecast(
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> dict[str, Any]:
-    """Fetch forecast weather and return normalized evidence for ORCA.
-
-    For an explicit future window, fetch enough calendar days to include the
-    requested date, then filter the returned hourly values to that window.
-    """
+    """Fetch WeatherAPI forecast and return normalized ORCA evidence."""
     if not settings.WEATHER_API_KEY:
         return {
             "status": "error",
@@ -84,6 +87,7 @@ def get_weather_forecast(
 
     start = _parse_window(start_time)
     end = _parse_window(end_time)
+
     if start and end and end < start:
         return {
             "status": "error",
@@ -92,11 +96,15 @@ def get_weather_forecast(
         }
 
     if start and end:
-        # WeatherAPI's `days` parameter counts from the current local day.
-        # Always request at least two days for a resolved future window so a
-        # `tomorrow ...` query includes tomorrow's forecast.
-        current_local_date = datetime.now(start.tzinfo).date() if start.tzinfo else datetime.now().date()
-        days = max(1, (end.date() - current_local_date).days + 1)
+        current_local_date = (
+            datetime.now(start.tzinfo).date()
+            if start.tzinfo
+            else datetime.now().date()
+        )
+        days = max(
+            1,
+            (end.date() - current_local_date).days + 1,
+        )
         days = max(days, 2)
 
     if not 1 <= days <= 14:
@@ -111,7 +119,11 @@ def get_weather_forecast(
     }
 
     try:
-        response = requests.get(BASE_URL, params=params, timeout=10)
+        response = requests.get(
+            BASE_URL,
+            params=params,
+            timeout=10,
+        )
         response.raise_for_status()
         data = response.json()
     except requests.RequestException as exc:
@@ -122,34 +134,53 @@ def get_weather_forecast(
         }
 
     location = data.get("location", {})
-    raw_forecast_days = data.get("forecast", {}).get("forecastday", [])
-    alerts = data.get("alerts", {}).get("alert", [])
+    raw_forecast_days = data.get(
+        "forecast",
+        {},
+    ).get("forecastday", [])
+    alerts = data.get("alerts", {}).get(
+        "alert",
+        [],
+    )
 
     normalized_days: list[dict[str, Any]] = []
+
     for forecast_day in raw_forecast_days:
         day = forecast_day.get("day", {})
         hourly = forecast_day.get("hour", [])
-        normalized_hours = [
-            {
-                "time": hour.get("time"),
-                "temperature_c": hour.get("temp_c"),
-                "feels_like_c": hour.get("feelslike_c"),
-                "wind_kph": hour.get("wind_kph"),
-                "wind_direction": hour.get("wind_dir"),
-                "gust_kph": hour.get("gust_kph"),
-                "rain_probability": hour.get("chance_of_rain"),
-                "precipitation_mm": hour.get("precip_mm"),
-                "condition": hour.get("condition", {}).get("text"),
-            }
-            for hour in hourly
-        ]
+
+        normalized_hours: list[dict[str, Any]] = []
+
+        for hour in hourly:
+            wind_kph = hour.get("wind_kph")
+            gust_kph = hour.get("gust_kph")
+
+            normalized_hours.append(
+                {
+                    "time": hour.get("time"),
+                    "temperature_c": hour.get("temp_c"),
+                    "feels_like_c": hour.get("feelslike_c"),
+                    "wind_kph": wind_kph,
+                    "wind_speed_m_s": _wind_ms(wind_kph),
+                    "wind_direction": hour.get("wind_dir"),
+                    "gust_kph": gust_kph,
+                    "gust_speed_m_s": _wind_ms(gust_kph),
+                    "rain_probability": hour.get("chance_of_rain"),
+                    "precipitation_mm": hour.get("precip_mm"),
+                    "condition": hour.get("condition", {}).get("text"),
+                }
+            )
+
+        max_wind_kph = day.get("maxwind_kph")
+
         normalized_days.append(
             {
                 "date": forecast_day.get("date"),
                 "max_temperature_c": day.get("maxtemp_c"),
                 "min_temperature_c": day.get("mintemp_c"),
                 "avg_temperature_c": day.get("avgtemp_c"),
-                "max_wind_kph": day.get("maxwind_kph"),
+                "max_wind_kph": max_wind_kph,
+                "max_wind_speed_m_s": _wind_ms(max_wind_kph),
                 "rain_probability": day.get("daily_chance_of_rain"),
                 "condition": day.get("condition", {}).get("text"),
                 "hours": normalized_hours,
@@ -162,9 +193,25 @@ def get_weather_forecast(
         end_time=end_time,
     )
 
-    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # A compact canonical wind value is useful to the ORCA frontend while
+    # keeping the complete hourly evidence for the risk engine.
+    latest_hour: dict[str, Any] | None = None
+    for day in reversed(selected_days):
+        if day.get("hours"):
+            latest_hour = day["hours"][-1]
+            break
 
-    evidence = {
+    if latest_hour is None:
+        for day in reversed(normalized_days):
+            if day.get("hours"):
+                latest_hour = day["hours"][-1]
+                break
+
+    retrieved_at = datetime.now(
+        timezone.utc
+    ).isoformat(timespec="seconds")
+
+    evidence: dict[str, Any] = {
         "source": "WeatherAPI",
         "dataset": "Forecast API",
         "type": "forecast",
@@ -185,8 +232,24 @@ def get_weather_forecast(
         "alerts": alerts,
     }
 
+    if latest_hour:
+        evidence["wind_speed_m_s"] = latest_hour.get(
+            "wind_speed_m_s"
+        )
+        evidence["wind_kph"] = latest_hour.get(
+            "wind_kph"
+        )
+        evidence["wind_direction"] = latest_hour.get(
+            "wind_direction"
+        )
+        evidence["wind_timestamp"] = latest_hour.get(
+            "time"
+        )
+
     if start and end and not selected_days:
-        evidence["window_warning"] = "No hourly forecast records matched the requested time window."
+        evidence["window_warning"] = (
+            "No hourly forecast records matched the requested time window."
+        )
 
     return {
         "status": "success",
