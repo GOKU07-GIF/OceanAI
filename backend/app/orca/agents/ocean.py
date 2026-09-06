@@ -13,6 +13,7 @@ from app.orca.tools.registry import tool_registry
 
 _MARINE_SAFETY_VARIABLES = [
     "sst_c",
+    "salinity_psu",
     "wave_height_m",
     "wave_period_s",
 ]
@@ -132,11 +133,14 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     if requested_time.get("end"):
         marine_request["end_time"] = requested_time["end"]
 
+    # Prefer Copernicus for current/model-backed marine conditions.
+    # INCOIS remains available as a fallback for variables Copernicus
+    # cannot supply.
     marine_result = marine_provider.fetch(
         request=marine_request,
         provider_order=(
-            "incois",
             "copernicus",
+            "incois",
             "copernicus_chlorophyll",
             "mosdac",
         ),
