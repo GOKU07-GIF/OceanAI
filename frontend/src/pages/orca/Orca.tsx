@@ -58,32 +58,75 @@ function collectEvidenceRecords(value: unknown): OrcaEvidence[] {
   return records;
 }
 
-function findNestedValue(value: unknown, names: string[]): unknown {
-  const wanted = names.map((name) => name.toLowerCase().replaceAll("-", "_"));
+function findExactNestedValue(value: unknown, names: string[]): unknown {
+  const wanted = new Set(names.map((name) => name.toLowerCase().replaceAll("-", "_")));
   if (Array.isArray(value)) {
-    for (const item of value) { const found = findNestedValue(item, names); if (found !== undefined) return found; }
+    for (const item of value) {
+      const found = findExactNestedValue(item, names);
+      if (found !== undefined) return found;
+    }
     return undefined;
   }
+
   if (typeof value !== "object" || value === null) return undefined;
+
   const object = value as Record<string, unknown>;
   for (const [key, item] of Object.entries(object)) {
     const normalized = key.toLowerCase().replaceAll("-", "_");
-    if (wanted.some((name) => normalized === name || normalized.includes(name))) return item;
+    if (wanted.has(normalized) && item != null) return item;
   }
-  for (const item of Object.values(object)) { const found = findNestedValue(item, names); if (found !== undefined) return found; }
+
+  for (const item of Object.values(object)) {
+    const found = findExactNestedValue(item, names);
+    if (found !== undefined) return found;
+  }
+
   return undefined;
 }
 
-function getEvidenceValue(response: OrcaResponse | undefined, names: string[]): string {
+function getMarineConditionValue(response: OrcaResponse | undefined, names: string[]): string {
   if (!response) return "Unavailable";
-  const records = collectEvidenceRecords(response.evidence);
-  const recordMatch = records.find((item) => {
-    const metric = item.metric?.toLowerCase();
-    return metric ? names.some((name) => metric.includes(name)) : false;
-  });
-  if (recordMatch?.value != null) return formatValue(recordMatch.value);
-  const nestedValue = findNestedValue(response.evidence, names);
-  return nestedValue == null ? "Unavailable" : formatValue(nestedValue);
+
+  const oceanResults = Array.isArray(response.agent_results)
+    ? response.agent_results.filter((item) => {
+        return item?.agent === "ocean" && item?.status === "success";
+      })
+    : [];
+
+  for (const result of oceanResults) {
+    const conditions = getObjectValue(result, "conditions");
+    const value = findExactNestedValue(conditions, names);
+    if (typeof value === "number" && Number.isFinite(value)) return formatValue(value);
+  }
+
+  const evidenceValue = findExactNestedValue(response.evidence, names);
+  if (typeof evidenceValue === "number" && Number.isFinite(evidenceValue)) return formatValue(evidenceValue);
+  if (typeof evidenceValue === "string" && evidenceValue.trim()) return evidenceValue;
+
+  return "Unavailable";
+}
+
+function getWeatherValue(response: OrcaResponse | undefined, names: string[]): string {
+  if (!response) return "Unavailable";
+
+  const weatherResults = Array.isArray(response.agent_results)
+    ? response.agent_results.filter((item) => {
+        return item?.agent === "weather" && item?.status === "success";
+      })
+    : [];
+
+  for (const result of weatherResults) {
+    const evidence = getObjectValue(result, "evidence");
+    const value = findExactNestedValue(evidence, names);
+    if (typeof value === "number" && Number.isFinite(value)) return formatValue(value);
+    if (typeof value === "string" && value.trim()) return value;
+  }
+
+  return "Unavailable";
+}
+
+function getEvidenceValue(response: OrcaResponse | undefined, names: string[]): string {
+  return getMarineConditionValue(response, names);
 }
 
 function getDecisionPresentation(decision?: string): { label: string; description: string; container: string; badge: string; icon: React.ReactNode } {
@@ -132,11 +175,10 @@ export default function Orca(): React.JSX.Element {
   const responseText = result?.assistant_response;
   const hasStructuredRecommendation = Boolean(recommendationDecision || recommendationText || recommendationConfidence || recommendationRisk);
   const decisionPresentation = getDecisionPresentation(recommendationDecision);
-  const seaTemperature = getEvidenceValue(result, ["sea_temperature", "sst_c", "temperature"]);
-  const waveHeight = getEvidenceValue(result, ["wave_height", "wave_height_m"]);
-  const windSpeed = getEvidenceValue(result, ["wind_speed", "wind_speed_m_s"]);
-  const evidenceLocation = getEvidenceValue(result, ["location"]);
-  const selectedLocation = latitude !== null && longitude !== null ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : evidenceLocation;
+  const seaTemperature = getMarineConditionValue(result, ["sst_c"]);
+  const waveHeight = getMarineConditionValue(result, ["wave_height_m"]);
+  const windSpeed = getWeatherValue(result, ["wind_speed_m_s"]);
+  const selectedLocation = latitude !== null && longitude !== null ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : "Unavailable";
   const sources = collectSources(result?.evidence);
   const missingEvidence = collectMissingEvidence(recommendationFactors);
 
@@ -162,48 +204,26 @@ export default function Orca(): React.JSX.Element {
 
   const handleNearMe = (): void => {
     const nearMeQuery = "Fishing conditions near me";
-
     if (orca.isPending || isFindingLocation) return;
-
     setLocationError(null);
-
     if (!navigator.geolocation) {
       setLocationError("Location detection is not supported by this browser.");
       setQuery(nearMeQuery);
       return;
     }
-
     setIsFindingLocation(true);
     setQuery(nearMeQuery);
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const nextLatitude = position.coords.latitude;
         const nextLongitude = position.coords.longitude;
-
         setLatitude(nextLatitude);
         setLongitude(nextLongitude);
         setIsFindingLocation(false);
-
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${Date.now()}-user`,
-            role: "user",
-            text: nearMeQuery,
-          },
-        ]);
-
+        setMessages((current) => [...current, { id: `${Date.now()}-user`, role: "user", text: nearMeQuery }]);
         setQuery("");
-
         orca.mutate(
-          {
-            query: nearMeQuery,
-            language: "en",
-            latitude: nextLatitude,
-            longitude: nextLongitude,
-            ...(conversationId ? { conversation_id: conversationId } : {}),
-          },
+          { query: nearMeQuery, language: "en", latitude: nextLatitude, longitude: nextLongitude, ...(conversationId ? { conversation_id: conversationId } : {}) },
           {
             onSuccess: (response) => {
               if (response.conversation_id) setConversationId(response.conversation_id);
@@ -216,26 +236,15 @@ export default function Orca(): React.JSX.Element {
       (error) => {
         let message = "Unable to detect your location.";
         switch (error.code) {
-          case error.PERMISSION_DENIED:
-            message = "Location permission was denied. Allow location access and try again.";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            message = "Your current location is unavailable. Try again in a moment.";
-            break;
-          case error.TIMEOUT:
-            message = "Location detection timed out. Try again.";
-            break;
-          default:
-            break;
+          case error.PERMISSION_DENIED: message = "Location permission was denied. Allow location access and try again."; break;
+          case error.POSITION_UNAVAILABLE: message = "Your current location is unavailable. Try again in a moment."; break;
+          case error.TIMEOUT: message = "Location detection timed out. Try again."; break;
+          default: break;
         }
         setLocationError(message);
         setIsFindingLocation(false);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
     );
   };
 
