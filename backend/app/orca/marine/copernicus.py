@@ -5,6 +5,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import numpy as np
+
 from app.orca.marine.models import MarineDataRequest
 
 
@@ -77,6 +79,13 @@ class CopernicusMarineProvider:
 
         return number if math.isfinite(number) else None
 
+    @staticmethod
+    def _degrees_for_km(radius_km: float) -> tuple[float, float]:
+        radius_km = max(float(radius_km), 0.0)
+        latitude_degrees = radius_km / 111.0
+        longitude_degrees = radius_km / 104.0
+        return latitude_degrees, longitude_degrees
+
     def _open_dataset(
         self,
         *,
@@ -87,17 +96,30 @@ class CopernicusMarineProvider:
         minimum_depth: float | None = None,
         maximum_depth: float | None = None,
         recent_observation_days: int | None = None,
+        search_radius_km: float | None = None,
     ) -> Any:
         latitude = float(request["latitude"])
         longitude = float(request["longitude"])
 
+        minimum_longitude = longitude
+        maximum_longitude = longitude
+        minimum_latitude = latitude
+        maximum_latitude = latitude
+
+        if search_radius_km is not None and search_radius_km > 0:
+            lat_padding, lon_padding = self._degrees_for_km(search_radius_km)
+            minimum_longitude = max(-180.0, longitude - lon_padding)
+            maximum_longitude = min(180.0, longitude + lon_padding)
+            minimum_latitude = max(-90.0, latitude - lat_padding)
+            maximum_latitude = min(90.0, latitude + lat_padding)
+
         kwargs: dict[str, Any] = {
             "dataset_id": dataset_id,
             "variables": variables,
-            "minimum_longitude": longitude,
-            "maximum_longitude": longitude,
-            "minimum_latitude": latitude,
-            "maximum_latitude": latitude,
+            "minimum_longitude": minimum_longitude,
+            "maximum_longitude": maximum_longitude,
+            "minimum_latitude": minimum_latitude,
+            "maximum_latitude": maximum_latitude,
             "coordinates_selection_method": "nearest",
         }
 
@@ -136,58 +158,79 @@ class CopernicusMarineProvider:
         return copernicusmarine.open_dataset(**kwargs)
 
     @staticmethod
-    def _latest_valid_scalar(
+    def _distance_km(
+        latitude_1: float,
+        longitude_1: float,
+        latitude_2: float,
+        longitude_2: float,
+    ) -> float:
+        lat1 = math.radians(latitude_1)
+        lat2 = math.radians(latitude_2)
+        dlat = lat2 - lat1
+        dlon = math.radians(longitude_2 - longitude_1)
+        a = (
+            math.sin(dlat / 2.0) ** 2
+            + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2.0) ** 2
+        )
+        return 6371.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(1.0 - a, 0.0)))
+
+    def _has_valid_wave_value(
+        self,
+        selected: Any,
+        requested: list[str],
+    ) -> bool:
+        for canonical in requested:
+            provider_key = _WAVE_VARIABLES[canonical]
+            if provider_key not in selected.variables:
+                continue
+            value = self._scalar(selected[provider_key].values)
+            if value is not None:
+                return True
+        return False
+
+    def _nearest_valid_wave_point(
+        self,
         dataset: Any,
-        variable_name: str,
-    ) -> tuple[float | None, str | None, float | None]:
-        if variable_name not in dataset.variables:
-            return None, None, None
+        requested: list[str],
+        requested_latitude: float,
+        requested_longitude: float,
+    ) -> Any | None:
+        if "latitude" not in dataset.coords or "longitude" not in dataset.coords:
+            return None
 
-        field = dataset[variable_name]
-        has_time = "time" in field.dims
-        has_depth = "depth" in field.dims
+        latitude_values = np.asarray(dataset["latitude"].values).reshape(-1)
+        longitude_values = np.asarray(dataset["longitude"].values).reshape(-1)
+        if latitude_values.size == 0 or longitude_values.size == 0:
+            return None
 
-        time_count = field.sizes["time"] if has_time else 1
-        depth_count = field.sizes["depth"] if has_depth else 1
+        candidate_pairs: list[tuple[float, float, float]] = []
+        for candidate_latitude in latitude_values:
+            for candidate_longitude in longitude_values:
+                distance = self._distance_km(
+                    requested_latitude,
+                    requested_longitude,
+                    float(candidate_latitude),
+                    float(candidate_longitude),
+                )
+                candidate_pairs.append((distance, float(candidate_latitude), float(candidate_longitude)))
 
-        for time_index in range(time_count - 1, -1, -1):
-            for depth_index in range(depth_count):
-                indexers: dict[str, int] = {}
-                if has_time:
-                    indexers["time"] = time_index
-                if has_depth:
-                    indexers["depth"] = depth_index
+        candidate_pairs.sort(key=lambda item: item[0])
 
-                try:
-                    raw = field.isel(**indexers).values
-                except Exception:
-                    continue
+        for _, candidate_latitude, candidate_longitude in candidate_pairs:
+            try:
+                selected = dataset.sel(
+                    latitude=candidate_latitude,
+                    longitude=candidate_longitude,
+                    method="nearest",
+                )
+                if "time" in selected.dims:
+                    selected = selected.isel(time=-1)
+                if self._has_valid_wave_value(selected, requested):
+                    return selected
+            except Exception:
+                continue
 
-                value = CopernicusMarineProvider._scalar(raw)
-                if value is None:
-                    continue
-
-                timestamp: str | None = None
-                if has_time and "time" in dataset.coords:
-                    try:
-                        timestamp = str(
-                            dataset["time"].isel(time=time_index).values
-                        )
-                    except Exception:
-                        pass
-
-                depth_m: float | None = None
-                if has_depth and "depth" in dataset.coords:
-                    try:
-                        depth_m = CopernicusMarineProvider._scalar(
-                            dataset["depth"].isel(depth=depth_index).values
-                        )
-                    except Exception:
-                        pass
-
-                return value, timestamp, depth_m
-
-        return None, None, None
+        return None
 
     def _fetch_wave_data(
         self,
@@ -196,6 +239,9 @@ class CopernicusMarineProvider:
         request: MarineDataRequest,
         requested: list[str],
     ) -> dict[str, Any] | None:
+        requested_latitude = float(request["latitude"])
+        requested_longitude = float(request["longitude"])
+
         dataset = self._open_dataset(
             copernicusmarine=copernicusmarine,
             dataset_id=self.wave_dataset_id,
@@ -204,13 +250,44 @@ class CopernicusMarineProvider:
         )
 
         selected = dataset.sel(
-            latitude=request["latitude"],
-            longitude=request["longitude"],
+            latitude=requested_latitude,
+            longitude=requested_longitude,
             method="nearest",
         )
 
         if "time" in selected.dims:
             selected = selected.isel(time=-1)
+
+        search_radius_km = float(request.get("radius_km", 50.0) or 50.0)
+        snapped_to_ocean = False
+        requested_point = selected
+
+        if not self._has_valid_wave_value(selected, requested):
+            try:
+                dataset.close()
+            except Exception:
+                pass
+
+            dataset = self._open_dataset(
+                copernicusmarine=copernicusmarine,
+                dataset_id=self.wave_dataset_id,
+                variables=[_WAVE_VARIABLES[item] for item in requested],
+                request=request,
+                search_radius_km=search_radius_km,
+            )
+            selected = self._nearest_valid_wave_point(
+                dataset,
+                requested,
+                requested_latitude,
+                requested_longitude,
+            )
+            if selected is None:
+                try:
+                    dataset.close()
+                except Exception:
+                    pass
+                return None
+            snapped_to_ocean = True
 
         timestamp = (
             str(selected["time"].values)
@@ -218,13 +295,22 @@ class CopernicusMarineProvider:
             else datetime.now(timezone.utc).isoformat()
         )
 
+        selected_latitude = float(selected.latitude.values)
+        selected_longitude = float(selected.longitude.values)
+        distance_km = self._distance_km(
+            requested_latitude,
+            requested_longitude,
+            selected_latitude,
+            selected_longitude,
+        )
+
         result: dict[str, Any] = {
             "source": "Copernicus Marine",
             "dataset": self.wave_dataset_id,
             "type": "forecast",
             "location": {
-                "latitude": float(selected.latitude.values),
-                "longitude": float(selected.longitude.values),
+                "latitude": selected_latitude,
+                "longitude": selected_longitude,
             },
             "timestamp": timestamp,
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
@@ -232,6 +318,12 @@ class CopernicusMarineProvider:
             "metadata": {
                 "dataset_id": self.wave_dataset_id,
                 "variables": [_WAVE_VARIABLES[item] for item in requested],
+                "requested_location": {
+                    "latitude": requested_latitude,
+                    "longitude": requested_longitude,
+                },
+                "location_snap_distance_km": distance_km,
+                "snapped_to_nearest_valid_ocean_cell": snapped_to_ocean,
             },
         }
 
@@ -244,6 +336,9 @@ class CopernicusMarineProvider:
             value = self._scalar(selected[provider_key].values)
             if value is not None:
                 result[canonical] = value
+
+        if not self._has_valid_wave_value(selected, requested):
+            return None
 
         return result
 
