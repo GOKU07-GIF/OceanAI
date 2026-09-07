@@ -120,7 +120,9 @@ class CopernicusMarineProvider:
             "maximum_longitude": maximum_longitude,
             "minimum_latitude": minimum_latitude,
             "maximum_latitude": maximum_latitude,
-            "coordinates_selection_method": "nearest",
+            "coordinates_selection_method": (
+                "inside" if search_radius_km is not None else "nearest"
+            ),
         }
 
         username, password = self._credentials()
@@ -260,7 +262,6 @@ class CopernicusMarineProvider:
 
         search_radius_km = float(request.get("radius_km", 50.0) or 50.0)
         snapped_to_ocean = False
-        requested_point = selected
 
         if not self._has_valid_wave_value(selected, requested):
             try:
