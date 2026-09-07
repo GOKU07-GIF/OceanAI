@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -26,12 +27,80 @@ _MARINE_FISHING_VARIABLES = [
     "chlorophyll_mg_m3",
 ]
 
+# Keep user-facing ORCA requests fast. Waves remain live/operational data;
+# slower physics and ocean-colour values are read from the normalized store
+# when a recent cached observation exists. A missing/stale cache must never
+# block a safety response.
+_LIVE_MARINE_VARIABLES = [
+    "wave_height_m",
+    "wave_period_s",
+]
+
+_CACHED_MARINE_VARIABLES = [
+    "sst_c",
+    "salinity_psu",
+    "chlorophyll_mg_m3",
+]
+
+_MARINE_CACHE_MAX_AGE_DAYS = 14
 
 _FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
 
+def _build_cached_conditions(
+    result: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Convert recent normalized observations into ORCA condition fields."""
+    if result.get("fallback"):
+        # Do not use the legacy user-owned OceanData table as a marine cache.
+        return {}, []
+
+    conditions: dict[str, Any] = {}
+    observations = result.get("observations", [])
+    contributions: list[dict[str, Any]] = []
+
+    if not isinstance(observations, list):
+        return conditions, contributions
+
+    for observation in observations:
+        if not isinstance(observation, dict):
+            continue
+
+        variable = observation.get("variable")
+        value = observation.get("value")
+        if variable not in _CACHED_MARINE_VARIABLES:
+            continue
+        if not isinstance(value, (int, float)):
+            continue
+
+        conditions[variable] = float(value)
+        contributions.append(
+            {
+                "provider": "OceanAI normalized observation store",
+                "source": str(
+                    observation.get(
+                        "source",
+                        "OceanAI normalized observation store",
+                    )
+                ),
+                "dataset": str(
+                    observation.get(
+                        "dataset",
+                        "ocean_observations",
+                    )
+                ),
+                "type": "recent_cached_observation",
+                "variables": [variable],
+                "timestamp": observation.get("timestamp"),
+                "distance_km": observation.get("distance_km"),
+            }
+        )
+
+    return conditions, contributions
+
+
 def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
-    """Collect normalized observations plus authoritative live marine context."""
+    """Collect normalized observations plus fast authoritative marine context."""
     location = state.get("location")
     db = state.get("db")
     if not location:
@@ -74,6 +143,8 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
 
     requested_time = state.get("requested_time") or {}
 
+    # Keep the historical/normalized observation context visible, but never
+    # require it for the live safety path.
     local_result = get_ocean_conditions(
         db=db,
         latitude=location["latitude"],
@@ -113,13 +184,19 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
 
     updates["agent_results"].append(local_agent_result)
 
-    if local_result.get("status") == "success":
+    if local_result.get("status") == "success" and not local_result.get("fallback"):
         updates["evidence"].append(local_result)
 
+    # ------------------------------------------------------------------
+    # Live marine path: only fetch the fast operational wave dataset here.
+    # SST, salinity, and chlorophyll come from a recent normalized cache when
+    # available. This prevents a user request from waiting on slow remote
+    # physics/ocean-colour dataset opens.
+    # ------------------------------------------------------------------
     marine_request: MarineDataRequest = {
         "latitude": location["latitude"],
         "longitude": location["longitude"],
-        "variables": requested_variables,
+        "variables": list(_LIVE_MARINE_VARIABLES),
         "radius_km": 50.0,
     }
 
@@ -129,25 +206,65 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     if requested_time.get("end"):
         marine_request["end_time"] = requested_time["end"]
 
-    # Live ORCA conditions must come from current/operational providers.
-    # Do not fall back to the historical INCOIS SST adapter here because
-    # that dataset is not a current forecast source.
     marine_result = marine_provider.fetch(
         request=marine_request,
-        provider_order=(
-            "copernicus",
-            "copernicus_chlorophyll",
-        ),
+        provider_order=("copernicus",),
     )
 
     marine_data = marine_result.get("data")
 
+    # Recent cache lookup deliberately ignores the requested future window:
+    # it is context data, not a forecast. Only observations newer than the
+    # cache horizon are eligible, and legacy fallback data is rejected.
+    cache_cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(days=_MARINE_CACHE_MAX_AGE_DAYS)
+    ).isoformat()
+    cache_result = get_ocean_conditions(
+        db=db,
+        latitude=location["latitude"],
+        longitude=location["longitude"],
+        owner_id=state["user_id"],
+        radius_km=50.0,
+        limit=20,
+        requested_variables=_CACHED_MARINE_VARIABLES,
+        start_time=cache_cutoff,
+        end_time=None,
+    )
+    cached_conditions, cached_contributions = _build_cached_conditions(cache_result)
+
+    if isinstance(marine_data, dict) and cached_conditions:
+        metadata = dict(marine_data.get("metadata") or {})
+        metadata["cached_marine_variables"] = sorted(cached_conditions)
+        metadata["cache_max_age_days"] = _MARINE_CACHE_MAX_AGE_DAYS
+        marine_data = {
+            **marine_data,
+            **cached_conditions,
+            "metadata": metadata,
+        }
+
+    live_contributions = marine_result.get("provider_contributions", [])
+    provider_contributions = [
+        contribution
+        for contribution in live_contributions
+        if isinstance(contribution, dict)
+    ] + cached_contributions
+
+    resolved_variables = (
+        set(marine_data.keys())
+        if isinstance(marine_data, dict)
+        else set()
+    )
+    missing_variables = [
+        variable
+        for variable in requested_variables
+        if variable not in resolved_variables
+    ]
+
+    marine_status = marine_result.get("status", "unavailable")
     marine_agent_result: dict[str, Any] = {
         "agent": "ocean",
-        "status": marine_result.get(
-            "status",
-            "unavailable",
-        ),
+        "status": marine_status,
         "source": (
             marine_data.get("source")
             if isinstance(marine_data, dict)
@@ -159,18 +276,12 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
             else "marine data"
         ),
         "requested_variables": requested_variables,
-        "missing_variables": marine_result.get(
-            "missing_variables",
-            [],
-        ),
-        "provider_contributions": marine_result.get(
-            "provider_contributions",
-            [],
-        ),
-        "errors": marine_result.get(
-            "errors",
-            [],
-        ),
+        "live_variables": list(_LIVE_MARINE_VARIABLES),
+        "cached_variables": sorted(cached_conditions),
+        "cache_max_age_days": _MARINE_CACHE_MAX_AGE_DAYS,
+        "missing_variables": missing_variables,
+        "provider_contributions": provider_contributions,
+        "errors": marine_result.get("errors", []),
     }
 
     if isinstance(marine_data, dict):
@@ -180,58 +291,26 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
     updates["agent_results"].append(marine_agent_result)
 
     if is_fishing_query:
-        pfz_tool = tool_registry.get(
-            "get_pfz_advisory"
-        )
+        pfz_tool = tool_registry.get("get_pfz_advisory")
 
         pfz_result = pfz_tool(
-            language=state.get(
-                "language",
-                "en",
-            )
+            language=state.get("language", "en")
         )
 
         pfz_agent_result = {
             "agent": "ocean",
             "capability": "pfz",
-            "status": pfz_result.get(
-                "status",
-                "unavailable",
-            ),
-            "source": pfz_result.get(
-                "source",
-                "INCOIS",
-            ),
-            "dataset": pfz_result.get(
-                "dataset",
-                "PFZ Text Advisory",
-            ),
-            "advisory_date": pfz_result.get(
-                "advisory_date"
-            ),
-            "valid_until": pfz_result.get(
-                "valid_until"
-            ),
-            "locations": pfz_result.get(
-                "locations",
-                [],
-            ),
-            "pfz_available": pfz_result.get(
-                "pfz_available",
-                False,
-            ),
-            "quality": pfz_result.get(
-                "quality"
-            ),
-            "warning": pfz_result.get(
-                "location_warning"
-            ),
-            "webgis_url": pfz_result.get(
-                "webgis_url"
-            ),
-            "text_url": pfz_result.get(
-                "text_url"
-            ),
+            "status": pfz_result.get("status", "unavailable"),
+            "source": pfz_result.get("source", "INCOIS"),
+            "dataset": pfz_result.get("dataset", "PFZ Text Advisory"),
+            "advisory_date": pfz_result.get("advisory_date"),
+            "valid_until": pfz_result.get("valid_until"),
+            "locations": pfz_result.get("locations", []),
+            "pfz_available": pfz_result.get("pfz_available", False),
+            "quality": pfz_result.get("quality"),
+            "warning": pfz_result.get("location_warning"),
+            "webgis_url": pfz_result.get("webgis_url"),
+            "text_url": pfz_result.get("text_url"),
             "errors": (
                 [pfz_result["error"]]
                 if pfz_result.get("error")
