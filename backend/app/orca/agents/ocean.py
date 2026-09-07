@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.orca.marine.local_cache import get_cached_copernicus_sst
 from app.orca.marine.models import MarineDataRequest
 from app.orca.marine.provider import marine_provider
 from app.orca.state import ORCAState
@@ -43,6 +44,8 @@ _CACHED_MARINE_VARIABLES = [
 ]
 
 _MARINE_CACHE_MAX_AGE_DAYS = 14
+_LOCAL_SST_MAX_DISTANCE_KM = 75.0
+_LOCAL_SST_MAX_DEPTH_M = 10.0
 
 _FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
@@ -232,6 +235,36 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
         end_time=None,
     )
     cached_conditions, cached_contributions = _build_cached_conditions(cache_result)
+
+    # The normalized store is the preferred cache. When it has no recent SST,
+    # use the newest local Copernicus thetao NetCDF cache produced by the data
+    # pipeline. This is still provider data; it is explicitly labeled as a
+    # cached near-surface model temperature proxy rather than live sensor SST.
+    if "sst_c" not in cached_conditions:
+        local_sst = get_cached_copernicus_sst(
+            latitude=float(location["latitude"]),
+            longitude=float(location["longitude"]),
+            max_distance_km=_LOCAL_SST_MAX_DISTANCE_KM,
+            max_depth_m=_LOCAL_SST_MAX_DEPTH_M,
+        )
+        if local_sst is not None:
+            cached_conditions["sst_c"] = float(local_sst["sst_c"])
+            cached_contributions.append(
+                {
+                    "provider": "Copernicus Marine local NetCDF cache",
+                    "source": local_sst.get("source", "Copernicus Marine"),
+                    "dataset": local_sst.get("dataset_id", "thetao"),
+                    "type": local_sst.get(
+                        "data_type",
+                        "cached_copernicus_forecast",
+                    ),
+                    "variables": ["sst_c"],
+                    "timestamp": local_sst.get("timestamp"),
+                    "distance_km": local_sst.get("distance_km"),
+                    "depth_m": local_sst.get("depth_m"),
+                    "file": local_sst.get("file"),
+                }
+            )
 
     if isinstance(marine_data, dict) and cached_conditions:
         metadata = dict(marine_data.get("metadata") or {})
