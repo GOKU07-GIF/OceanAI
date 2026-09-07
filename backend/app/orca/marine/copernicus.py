@@ -121,9 +121,14 @@ class CopernicusMarineProvider:
             "minimum_latitude": minimum_latitude,
             "maximum_latitude": maximum_latitude,
             "coordinates_selection_method": (
-                "inside" if search_radius_km is not None else "nearest"
+                "outside" if search_radius_km is not None else "nearest"
             ),
         }
+
+        if search_radius_km is not None and search_radius_km > 0:
+            # The fallback is an area-over-a-few-time-steps query, which is
+            # the use case Copernicus documents for the Geo Series service.
+            kwargs["service"] = "geoseries"
 
         username, password = self._credentials()
         if username and password:
