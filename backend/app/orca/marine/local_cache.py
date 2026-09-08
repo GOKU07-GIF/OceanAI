@@ -319,6 +319,114 @@ def _latest_valid_salinity(
     return None
 
 
+def _latest_valid_chlorophyll(
+    dataset: xr.Dataset,
+    latitude: float,
+    longitude: float,
+    max_distance_km: float,
+) -> dict[str, Any] | None:
+    """Find the nearest finite CHL pixel, preferring the newest time."""
+    if "CHL" not in dataset.data_vars:
+        return None
+    if "latitude" not in dataset.coords or "longitude" not in dataset.coords:
+        return None
+
+    latitude_values = np.asarray(dataset["latitude"].values).reshape(-1)
+    longitude_values = np.asarray(dataset["longitude"].values).reshape(-1)
+    if latitude_values.size == 0 or longitude_values.size == 0:
+        return None
+
+    candidates: list[tuple[float, float, float]] = []
+    for candidate_latitude in latitude_values:
+        for candidate_longitude in longitude_values:
+            distance = _distance_km(
+                latitude,
+                longitude,
+                float(candidate_latitude),
+                float(candidate_longitude),
+            )
+            if distance <= max_distance_km:
+                candidates.append(
+                    (
+                        distance,
+                        float(candidate_latitude),
+                        float(candidate_longitude),
+                    )
+                )
+
+    candidates.sort(key=lambda item: item[0])
+    if not candidates:
+        return None
+
+    times = (
+        np.asarray(dataset["time"].values).reshape(-1)
+        if "time" in dataset.coords
+        else np.asarray([np.datetime64("NaT")])
+    )
+
+    chlorophyll = dataset["CHL"]
+    for distance, candidate_latitude, candidate_longitude in candidates:
+        try:
+            selected = chlorophyll.sel(
+                latitude=candidate_latitude,
+                longitude=candidate_longitude,
+                method="nearest",
+            )
+        except Exception:
+            continue
+
+        values = np.asarray(selected.values).reshape(-1)
+        time_count = max(times.size, 1)
+        if values.size == 0:
+            continue
+
+        # Search newest observation first. The product is daily, but this also
+        # handles files that contain more than one time coordinate.
+        for time_index in range(min(values.size, time_count) - 1, -1, -1):
+            try:
+                value = float(values[time_index])
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value):
+                continue
+
+            dataset_timestamp = (
+                str(times[time_index])
+                if time_index < times.size
+                else datetime.now(timezone.utc).isoformat()
+            )
+            return {
+                "chlorophyll_mg_m3": value,
+                "source": "Copernicus Marine",
+                "dataset": str(
+                    dataset.attrs.get(
+                        "title",
+                        dataset.attrs.get(
+                            "cmems_product_id",
+                            "Copernicus chlorophyll local NetCDF cache",
+                        ),
+                    )
+                ),
+                "dataset_id": dataset.attrs.get("cmems_product_id")
+                or dataset.attrs.get("product")
+                or "CHL",
+                "timestamp": dataset_timestamp,
+                "location": {
+                    "latitude": candidate_latitude,
+                    "longitude": candidate_longitude,
+                },
+                "distance_km": round(distance, 2),
+                "data_type": "cached_copernicus_nrt_observation",
+                "quality": "provider-dataset",
+                "note": (
+                    "Near-real-time daily Copernicus ocean-colour chlorophyll "
+                    "observation from the local NetCDF cache; not a forecast."
+                ),
+            }
+
+    return None
+
+
 def get_cached_copernicus_sst(
     *,
     latitude: float,
@@ -385,5 +493,49 @@ def get_cached_copernicus_salinity(
                     dataset.close()
                 except Exception:
                     pass
+
+    return None
+
+
+def get_cached_copernicus_chlorophyll(
+    *,
+    latitude: float,
+    longitude: float,
+    max_distance_km: float = DEFAULT_MAX_DISTANCE_KM,
+) -> dict[str, Any] | None:
+    """Read the newest valid CHL value from local Copernicus NRT files."""
+    patterns = (
+        "*cmems_obs-oc_glo_bgc-plankton_nrt_l3-multi-4km_P1D*.nc",
+        "*CHL*.nc",
+    )
+    seen: set[Path] = set()
+
+    for pattern in patterns:
+        for path in _candidate_files(pattern):
+            if path in seen:
+                continue
+            seen.add(path)
+
+            dataset: xr.Dataset | None = None
+            try:
+                dataset = xr.open_dataset(path)
+                result = _latest_valid_chlorophyll(
+                    dataset,
+                    latitude=latitude,
+                    longitude=longitude,
+                    max_distance_km=max_distance_km,
+                )
+                if result is not None:
+                    result["file"] = str(path)
+                    result["retrieved_at"] = datetime.now(timezone.utc).isoformat()
+                    return result
+            except Exception:
+                continue
+            finally:
+                if dataset is not None:
+                    try:
+                        dataset.close()
+                    except Exception:
+                        pass
 
     return None
