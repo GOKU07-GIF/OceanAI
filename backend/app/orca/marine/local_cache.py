@@ -38,12 +38,12 @@ def _repository_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def _candidate_files() -> list[Path]:
+def _candidate_files(pattern: str) -> list[Path]:
     directory = _repository_root() / "datasets" / "raw" / "copernicus"
     if not directory.exists():
         return []
     return sorted(
-        directory.glob("*thetao*.nc"),
+        directory.glob(pattern),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
@@ -110,8 +110,6 @@ def _latest_valid_thetao(
 
     thetao = dataset["thetao"]
 
-    # Search nearest spatially first, then newest valid forecast time, then
-    # shallowest valid level. Never synthesize a value from invalid cells.
     for distance, candidate_latitude, candidate_longitude in candidates:
         try:
             selected = thetao.sel(
@@ -123,7 +121,6 @@ def _latest_valid_thetao(
             continue
 
         values = np.asarray(selected.values)
-
         if "time" in selected.dims and "depth" in selected.dims:
             time_axis = selected.dims.index("time")
             depth_axis = selected.dims.index("depth")
@@ -187,6 +184,141 @@ def _latest_valid_thetao(
     return None
 
 
+def _latest_valid_salinity(
+    dataset: xr.Dataset,
+    latitude: float,
+    longitude: float,
+    max_distance_km: float,
+    max_depth_m: float,
+) -> dict[str, Any] | None:
+    if "so" not in dataset.data_vars:
+        return None
+    if "latitude" not in dataset.coords or "longitude" not in dataset.coords:
+        return None
+
+    latitude_values = np.asarray(dataset["latitude"].values).reshape(-1)
+    longitude_values = np.asarray(dataset["longitude"].values).reshape(-1)
+    if latitude_values.size == 0 or longitude_values.size == 0:
+        return None
+
+    candidates: list[tuple[float, float, float]] = []
+    for candidate_latitude in latitude_values:
+        for candidate_longitude in longitude_values:
+            distance = _distance_km(
+                latitude,
+                longitude,
+                float(candidate_latitude),
+                float(candidate_longitude),
+            )
+            if distance <= max_distance_km:
+                candidates.append(
+                    (
+                        distance,
+                        float(candidate_latitude),
+                        float(candidate_longitude),
+                    )
+                )
+
+    candidates.sort(key=lambda item: item[0])
+    if not candidates:
+        return None
+
+    times = (
+        np.asarray(dataset["time"].values).reshape(-1)
+        if "time" in dataset.coords
+        else np.asarray([np.datetime64("NaT")])
+    )
+
+    if "depth" in dataset.coords:
+        depth_values = np.asarray(dataset["depth"].values).reshape(-1)
+    else:
+        depth_values = np.asarray([0.0])
+
+    allowed_depth_indices = [
+        index
+        for index, depth in enumerate(depth_values)
+        if math.isfinite(float(depth)) and float(depth) <= max_depth_m
+    ]
+    if not allowed_depth_indices:
+        return None
+    allowed_depth_indices.sort(key=lambda index: float(depth_values[index]))
+
+    salinity = dataset["so"]
+
+    for distance, candidate_latitude, candidate_longitude in candidates:
+        try:
+            selected = salinity.sel(
+                latitude=candidate_latitude,
+                longitude=candidate_longitude,
+                method="nearest",
+            )
+        except Exception:
+            continue
+
+        values = np.asarray(selected.values)
+        if "time" in selected.dims and "depth" in selected.dims:
+            time_axis = selected.dims.index("time")
+            depth_axis = selected.dims.index("depth")
+            values = np.moveaxis(values, (time_axis, depth_axis), (0, 1))
+        elif "time" in selected.dims:
+            time_axis = selected.dims.index("time")
+            values = np.moveaxis(values, time_axis, 0)[:, None]
+        elif "depth" in selected.dims:
+            depth_axis = selected.dims.index("depth")
+            values = np.moveaxis(values, depth_axis, 0)[None, :]
+        else:
+            values = np.asarray(values).reshape(1, 1)
+
+        for time_index in range(values.shape[0] - 1, -1, -1):
+            for depth_index in allowed_depth_indices:
+                if depth_index >= values.shape[1]:
+                    continue
+                try:
+                    value = float(values[time_index, depth_index])
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(value):
+                    continue
+
+                dataset_timestamp = (
+                    str(times[time_index])
+                    if time_index < times.size
+                    else datetime.now(timezone.utc).isoformat()
+                )
+                return {
+                    "salinity_psu": value,
+                    "source": "Copernicus Marine",
+                    "dataset": str(
+                        dataset.attrs.get(
+                            "title",
+                            dataset.attrs.get(
+                                "product",
+                                "Copernicus salinity local NetCDF cache",
+                            ),
+                        )
+                    ),
+                    "dataset_id": dataset.attrs.get("product")
+                    or dataset.attrs.get("dataset_id")
+                    or "so",
+                    "timestamp": dataset_timestamp,
+                    "location": {
+                        "latitude": candidate_latitude,
+                        "longitude": candidate_longitude,
+                    },
+                    "distance_km": round(distance, 2),
+                    "depth_m": float(depth_values[depth_index]),
+                    "data_type": "cached_copernicus_forecast",
+                    "quality": "provider-dataset",
+                    "note": (
+                        "Near-surface Copernicus model salinity from the local "
+                        "NetCDF cache, using the latest valid shallow ocean level; "
+                        "not an in-situ sensor measurement."
+                    ),
+                }
+
+    return None
+
+
 def get_cached_copernicus_sst(
     *,
     latitude: float,
@@ -195,11 +327,46 @@ def get_cached_copernicus_sst(
     max_depth_m: float = DEFAULT_MAX_DEPTH_M,
 ) -> dict[str, Any] | None:
     """Read the newest valid near-surface thetao value from local Copernicus files."""
-    for path in _candidate_files():
+    for path in _candidate_files("*thetao*.nc"):
         dataset: xr.Dataset | None = None
         try:
             dataset = xr.open_dataset(path)
             result = _latest_valid_thetao(
+                dataset,
+                latitude=latitude,
+                longitude=longitude,
+                max_distance_km=max_distance_km,
+                max_depth_m=max_depth_m,
+            )
+            if result is not None:
+                result["file"] = str(path)
+                result["retrieved_at"] = datetime.now(timezone.utc).isoformat()
+                return result
+        except Exception:
+            continue
+        finally:
+            if dataset is not None:
+                try:
+                    dataset.close()
+                except Exception:
+                    pass
+
+    return None
+
+
+def get_cached_copernicus_salinity(
+    *,
+    latitude: float,
+    longitude: float,
+    max_distance_km: float = DEFAULT_MAX_DISTANCE_KM,
+    max_depth_m: float = DEFAULT_MAX_DEPTH_M,
+) -> dict[str, Any] | None:
+    """Read the newest valid near-surface salinity value from local Copernicus files."""
+    for path in _candidate_files("*cmems_mod_glo_phy-so_*.nc"):
+        dataset: xr.Dataset | None = None
+        try:
+            dataset = xr.open_dataset(path)
+            result = _latest_valid_salinity(
                 dataset,
                 latitude=latitude,
                 longitude=longitude,
