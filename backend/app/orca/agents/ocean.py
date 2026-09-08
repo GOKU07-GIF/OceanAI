@@ -5,7 +5,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.orca.marine.local_cache import get_cached_copernicus_sst
+from app.orca.marine.local_cache import (
+    get_cached_copernicus_salinity,
+    get_cached_copernicus_sst,
+)
 from app.orca.marine.models import MarineDataRequest
 from app.orca.marine.provider import marine_provider
 from app.orca.state import ORCAState
@@ -46,6 +49,8 @@ _CACHED_MARINE_VARIABLES = [
 _MARINE_CACHE_MAX_AGE_DAYS = 14
 _LOCAL_SST_MAX_DISTANCE_KM = 75.0
 _LOCAL_SST_MAX_DEPTH_M = 10.0
+_LOCAL_SALINITY_MAX_DISTANCE_KM = 75.0
+_LOCAL_SALINITY_MAX_DEPTH_M = 10.0
 
 _FISHING_TERMS = ("fishing", "fish", "pfz", "fishing zone")
 
@@ -263,6 +268,43 @@ def run_ocean_agent(state: ORCAState) -> dict[str, Any]:
                     "distance_km": local_sst.get("distance_km"),
                     "depth_m": local_sst.get("depth_m"),
                     "file": local_sst.get("file"),
+                }
+            )
+
+    # When the normalized store has no recent salinity, use the newest local
+    # Copernicus so NetCDF cache. This keeps salinity off the slow synchronous
+    # remote path while preserving source, depth, timestamp, and distance.
+    if "salinity_psu" not in cached_conditions:
+        local_salinity = get_cached_copernicus_salinity(
+            latitude=float(location["latitude"]),
+            longitude=float(location["longitude"]),
+            max_distance_km=_LOCAL_SALINITY_MAX_DISTANCE_KM,
+            max_depth_m=_LOCAL_SALINITY_MAX_DEPTH_M,
+        )
+        if local_salinity is not None:
+            cached_conditions["salinity_psu"] = float(
+                local_salinity["salinity_psu"]
+            )
+            cached_contributions.append(
+                {
+                    "provider": "Copernicus Marine local NetCDF cache",
+                    "source": local_salinity.get(
+                        "source",
+                        "Copernicus Marine",
+                    ),
+                    "dataset": local_salinity.get(
+                        "dataset_id",
+                        "so",
+                    ),
+                    "type": local_salinity.get(
+                        "data_type",
+                        "cached_copernicus_forecast",
+                    ),
+                    "variables": ["salinity_psu"],
+                    "timestamp": local_salinity.get("timestamp"),
+                    "distance_km": local_salinity.get("distance_km"),
+                    "depth_m": local_salinity.get("depth_m"),
+                    "file": local_salinity.get("file"),
                 }
             )
 
